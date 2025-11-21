@@ -43,8 +43,8 @@ class MusicManagerWindow:
         # ウィンドウの作成
         self.window = tk.Toplevel(parent)
         self.window.title("音楽管理 - メドレー設定")
-        self.window.geometry("700x500")
-        self.window.minsize(600, 400)
+        self.window.geometry("700x700")
+        self.window.minsize(600, 650)
         self.window.configure(bg=COLOR_BACKGROUND)
 
         # モーダルウィンドウとして設定
