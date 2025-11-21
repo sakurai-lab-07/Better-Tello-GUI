@@ -230,3 +230,6 @@ def _cleanup_controllers(controllers, log_queue):
         c.close()
 
     log_queue.put({"level": "INFO", "message": "--- 全ての接続を閉じました。 ---"})
+
+    # ショー完了を通知
+    log_queue.put({"type": "show_complete"})

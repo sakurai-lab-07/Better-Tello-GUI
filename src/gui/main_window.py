@@ -56,10 +56,16 @@ class TelloApp:
         self.time_to_line_map = {}
         self.last_highlighted_lines = None
         self.sb3_path = tk.StringVar()
+        self.audio_path = tk.StringVar()  # 音楽ファイルパス
         self.show_status = tk.StringVar(value="準備完了")
         self.log_queue = Queue()
         self.show_thread = None
         self.stop_event = threading.Event()
+
+        # 音楽プレイヤーの初期化
+        from music_player import MusicPlayer
+
+        self.music_player = MusicPlayer(log_queue=self.log_queue)
 
         # UI構築と初期化
         self._create_widgets()
@@ -175,6 +181,37 @@ class TelloApp:
         """ショー実行セクションを作成"""
         action_frame = ttk.LabelFrame(parent, text="③ ショー実行", padding="10")
         action_frame.pack(fill="x")
+
+        # 音楽管理セクション
+        music_label_frame = ttk.Frame(action_frame)
+        music_label_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(music_label_frame, text="🎵 音楽設定:").pack(anchor="w")
+        self.audio_info_label = ttk.Label(
+            music_label_frame,
+            text="設定されていません",
+            wraplength=230,
+            foreground="#666",
+        )
+        self.audio_info_label.pack(fill="x", pady=(2, 5))
+
+        # 音楽管理ボタン
+        music_btn_frame = ttk.Frame(music_label_frame)
+        music_btn_frame.pack(fill="x")
+
+        ttk.Button(
+            music_btn_frame,
+            text="🎼 メドレー管理",
+            command=self.open_music_manager,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        ttk.Button(
+            music_btn_frame,
+            text="🎶 クイック選択",
+            command=self.select_audio_file,
+        ).pack(side="left", fill="x", expand=True)
+
+        ttk.Separator(action_frame, orient="horizontal").pack(fill="x", pady=10)
 
         self.parse_btn = ttk.Button(
             action_frame,
@@ -385,6 +422,64 @@ class TelloApp:
             self.log({"level": "INFO", "message": f"選択されたファイル: {path}"})
             self.show_status.set(f"ファイル選択済み: {path.split('/')[-1]}")
 
+    def select_audio_file(self):
+        """音楽ファイルを選択（クイック選択）"""
+        path = filedialog.askopenfilename(
+            title="音楽ファイルを選択",
+            filetypes=[
+                ("音楽ファイル", "*.mp3;*.wav;*.ogg"),
+                ("MP3ファイル", "*.mp3"),
+                ("WAVファイル", "*.wav"),
+                ("OGGファイル", "*.ogg"),
+                ("すべてのファイル", "*.*"),
+            ],
+        )
+
+        if path:
+            self.audio_path.set(path)
+            filename = path.split("/")[-1]
+
+            # メドレーリストをクリアして単一ファイルに設定
+            self.music_player.set_music_list([])
+            self.music_player.set_music(path)
+
+            # UI更新
+            self.audio_info_label.configure(
+                text=f"単一ファイル: {filename}", foreground="black"
+            )
+            self.log({"level": "INFO", "message": f"音楽ファイルを選択: {filename}"})
+
+    def open_music_manager(self):
+        """音楽管理ウィンドウを開く"""
+        from gui.music_manager_window import MusicManagerWindow
+
+        # 現在の音楽リストを取得
+        current_list = self.music_player.get_music_list()
+
+        # 音楽管理ウィンドウを開く
+        MusicManagerWindow(
+            self.master, self.music_player, current_list, self._on_music_list_saved
+        )
+
+    def _on_music_list_saved(self, music_list):
+        """音楽リストが保存された時のコールバック"""
+        # 音楽リストを設定
+        self.music_player.set_music_list(music_list)
+
+        # UI更新
+        if music_list:
+            self.audio_info_label.configure(
+                text=f"メドレー: {len(music_list)}曲", foreground=COLOR_SUCCESS
+            )
+            self.log(
+                {"level": "INFO", "message": f"メドレーを設定: {len(music_list)}曲"}
+            )
+        else:
+            self.audio_info_label.configure(
+                text="設定されていません", foreground="#666"
+            )
+            self.log({"level": "INFO", "message": "音楽設定をクリアしました"})
+
     def parse_scratch_project(self):
         """Scratchプロジェクトを解析してタイムラインを生成"""
         path = self.sb3_path.get()
@@ -498,6 +593,12 @@ class TelloApp:
         self.stop_event.clear()
         self.show_status.set("ショー実行中...")
 
+        # 音楽を再生（音楽リストまたは単一ファイルが設定されている場合）
+        music_list = self.music_player.get_music_list()
+        if music_list or self.audio_path.get():
+            # ドローンのtakeoffコマンドの実行時間（約3秒）を考慮して遅延
+            self.music_player.play(delay=3.0)
+
         # ショーを別スレッドで実行
         self.show_thread = threading.Thread(
             target=run_show_worker,
@@ -520,6 +621,9 @@ class TelloApp:
             }
         )
         self.stop_event.set()
+
+        # 音楽を停止
+        self.music_player.stop()
 
         # UIの状態を更新
         self.stop_btn["state"] = "disabled"
@@ -548,6 +652,14 @@ class TelloApp:
                         continue
                     elif log_item["type"] == "clear_highlight":
                         self.update_timeline_highlight(None)
+                        continue
+                    elif log_item["type"] == "show_complete":
+                        # ショー完了時の処理
+                        self.music_player.stop()
+                        self.start_btn["state"] = "normal"
+                        self.parse_btn["state"] = "normal"
+                        self.stop_btn["state"] = "disabled"
+                        self.show_status.set("ショー完了")
                         continue
 
                 # 通常のログ
@@ -599,4 +711,6 @@ class TelloApp:
                 self.emergency_stop()
                 self.master.destroy()
         else:
+            # 音楽を停止
+            self.music_player.stop()
             self.master.destroy()
