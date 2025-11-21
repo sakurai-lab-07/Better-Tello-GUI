@@ -461,19 +461,25 @@ class TelloApp:
             self.master, self.music_player, current_list, self._on_music_list_saved
         )
 
-    def _on_music_list_saved(self, music_list):
+    def _on_music_list_saved(self, music_list, interval=0.0):
         """音楽リストが保存された時のコールバック"""
         # 音楽リストを設定
         self.music_player.set_music_list(music_list)
 
+        # インターバルを設定
+        self.music_player.set_interval(interval)
+
         # UI更新
         if music_list:
+            interval_text = f" (間隔: {interval}秒)" if interval > 0 else ""
             self.audio_info_label.configure(
-                text=f"メドレー: {len(music_list)}曲", foreground=COLOR_SUCCESS
+                text=f"メドレー: {len(music_list)}曲{interval_text}",
+                foreground=COLOR_SUCCESS,
             )
-            self.log(
-                {"level": "INFO", "message": f"メドレーを設定: {len(music_list)}曲"}
-            )
+            log_msg = f"メドレーを設定: {len(music_list)}曲"
+            if interval > 0:
+                log_msg += f" (曲間インターバル: {interval}秒)"
+            self.log({"level": "INFO", "message": log_msg})
         else:
             self.audio_info_label.configure(
                 text="設定されていません", foreground="#666"

@@ -37,6 +37,9 @@ class MusicManagerWindow:
         self.on_save_callback = on_save_callback
         self.preview_index = None
 
+        # インターバル設定（デフォルト0秒）
+        self.interval_seconds = tk.DoubleVar(value=music_player.get_interval())
+
         # ウィンドウの作成
         self.window = tk.Toplevel(parent)
         self.window.title("音楽管理 - メドレー設定")
@@ -151,9 +154,50 @@ class MusicManagerWindow:
             pady=2
         )
 
+        # インターバル設定フレーム
+        interval_frame = ttk.LabelFrame(
+            main_frame, text="⏱️ 曲間インターバル設定", padding="10"
+        )
+        interval_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+
+        interval_inner = ttk.Frame(interval_frame, style="MusicManager.TFrame")
+        interval_inner.pack(fill="x")
+
+        ttk.Label(
+            interval_inner,
+            text="曲と曲の間の待機時間:",
+            style="MusicManager.TLabel",
+        ).pack(side="left")
+
+        # スピンボックスでインターバルを設定
+        interval_spinbox = ttk.Spinbox(
+            interval_inner,
+            from_=0.0,
+            to=10.0,
+            increment=0.5,
+            textvariable=self.interval_seconds,
+            width=10,
+            font=FONT_NORMAL,
+        )
+        interval_spinbox.pack(side="left", padx=(10, 5))
+
+        ttk.Label(
+            interval_inner,
+            text="秒",
+            style="MusicManager.TLabel",
+        ).pack(side="left")
+
+        ttk.Label(
+            interval_frame,
+            text="※ 0秒の場合は連続再生、1秒以上で次の曲までの待機時間を設定できます",
+            style="MusicManager.TLabel",
+            foreground="#666",
+            font=("Arial", 8),
+        ).pack(anchor="w", pady=(5, 0))
+
         # 情報表示フレーム
         info_frame = ttk.Frame(main_frame, style="MusicManager.TFrame")
-        info_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        info_frame.grid(row=3, column=0, sticky="ew", pady=(0, 10))
 
         self.info_label = ttk.Label(
             info_frame,
@@ -165,7 +209,7 @@ class MusicManagerWindow:
 
         # 下部ボタンフレーム
         bottom_frame = ttk.Frame(main_frame, style="MusicManager.TFrame")
-        bottom_frame.grid(row=3, column=0, sticky="ew")
+        bottom_frame.grid(row=4, column=0, sticky="ew")
 
         ttk.Button(
             bottom_frame,
@@ -324,8 +368,12 @@ class MusicManagerWindow:
         # プレビューを停止
         self._stop_preview()
 
-        # コールバックを呼び出し
-        self.on_save_callback(self.music_list)
+        # インターバル設定を保存
+        interval = self.interval_seconds.get()
+        self.music_player.set_interval(interval)
+
+        # コールバックを呼び出し（音楽リストとインターバルを渡す）
+        self.on_save_callback(self.music_list, interval)
 
         # ウィンドウを閉じる
         self.window.destroy()

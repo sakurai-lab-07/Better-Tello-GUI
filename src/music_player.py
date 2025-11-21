@@ -26,6 +26,7 @@ class MusicPlayer:
         self.log_queue = log_queue
         self.music_path = None
         self.music_list = []  # メドレー用の音楽リスト
+        self.interval_seconds = 0.0  # 曲間のインターバル（秒）
         self.is_playing = False
         self.stop_event = threading.Event()
         self.pygame_available = PYGAME_AVAILABLE
@@ -74,6 +75,21 @@ class MusicPlayer:
     def get_music_list(self):
         """現在の音楽リストを取得"""
         return self.music_list.copy()
+
+    def set_interval(self, seconds):
+        """
+        曲間のインターバルを設定
+
+        Args:
+            seconds: インターバル時間（秒）
+        """
+        self.interval_seconds = max(0.0, float(seconds))
+        if self.interval_seconds > 0:
+            self._log("INFO", f"曲間インターバルを設定: {self.interval_seconds}秒")
+
+    def get_interval(self):
+        """現在のインターバル設定を取得"""
+        return self.interval_seconds
 
     def play(self, delay=0):
         """
@@ -151,6 +167,10 @@ class MusicPlayer:
                     "SUCCESS", f"🎵 メドレー再生を開始（全{len(self.music_list)}曲）"
                 )
 
+                # インターバル設定を表示
+                if self.interval_seconds > 0:
+                    self._log("INFO", f"曲間インターバル: {self.interval_seconds}秒")
+
                 # 各曲を順番に再生
                 for i, music_path in enumerate(self.music_list, 1):
                     if self.stop_event.is_set():
@@ -176,6 +196,23 @@ class MusicPlayer:
 
                         if self.stop_event.is_set():
                             break
+
+                        # 曲間インターバル（最後の曲の後は不要）
+                        if i < len(self.music_list) and self.interval_seconds > 0:
+                            self._log(
+                                "INFO",
+                                f"⏱️ インターバル: {self.interval_seconds}秒待機中...",
+                            )
+                            # インターバル中も停止イベントをチェック
+                            interval_start = time.time()
+                            while (
+                                time.time() - interval_start < self.interval_seconds
+                                and not self.stop_event.is_set()
+                            ):
+                                time.sleep(0.1)
+
+                            if self.stop_event.is_set():
+                                break
 
                     except Exception as e:
                         self._log("ERROR", f"曲 {i} の再生エラー: {e}")
