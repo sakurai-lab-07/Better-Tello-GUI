@@ -36,8 +36,8 @@ class TelloApp:
         """アプリケーションの初期化"""
         self.master = master
         self.master.title("Tello Scratch ドローンショー・コントローラー")
-        self.master.geometry("900x750")
-        self.master.minsize(800, 750)
+        self.master.geometry("980x800")
+        self.master.minsize(850, 800)
         self.master.configure(bg=COLOR_BACKGROUND)
 
         # フォント設定
