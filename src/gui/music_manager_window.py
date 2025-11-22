@@ -34,6 +34,7 @@ class MusicManagerWindow:
         self.parent = parent
         self.music_player = music_player
         self.music_list = music_list.copy()  # コピーを作成
+        self.original_music_list = music_list.copy()  # 元のリストを保持
         self.on_save_callback = on_save_callback
         self.preview_index = None
 
@@ -325,9 +326,12 @@ class MusicManagerWindow:
         index = selection[0]
         self.preview_index = index
 
-        # プレビュー再生
+        # プレビュー再生（選択した曲のみ）
         self.music_player.stop()
-        self.music_player.set_music(self.music_list[index])
+
+        # 一時的に音楽リストをクリアして単一ファイルとして再生
+        self.music_player.set_music_list([])  # メドレーリストをクリア
+        self.music_player.set_music(self.music_list[index])  # 選択した曲を設定
         self.music_player.play(delay=0)
 
         # ステータス更新
@@ -340,6 +344,9 @@ class MusicManagerWindow:
         """プレビューを停止"""
         self.music_player.stop()
         self.preview_index = None
+
+        # 元の音楽リストを復元
+        self.music_player.set_music_list(self.original_music_list)
 
         # ステータス更新
         if self.music_list:
