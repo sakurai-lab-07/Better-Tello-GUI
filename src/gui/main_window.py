@@ -61,6 +61,7 @@ class TelloApp:
         self.log_queue = Queue()
         self.show_thread = None
         self.stop_event = threading.Event()
+        self.timeline_window = None  # タイムラインウィンドウの参照
 
         # 音楽プレイヤーの初期化
         from music_player import MusicPlayer
@@ -220,6 +221,14 @@ class TelloApp:
             state="disabled",
         )
         self.parse_btn.pack(fill="x", pady=(0, 5))
+
+        self.timeline_viewer_btn = ttk.Button(
+            action_frame,
+            text="🎬 タイムラインを表示",
+            command=self.open_timeline_viewer,
+            state="disabled",
+        )
+        self.timeline_viewer_btn.pack(fill="x", pady=(5, 5))
 
         self.start_btn = ttk.Button(
             action_frame,
@@ -462,6 +471,54 @@ class TelloApp:
             self.master, self.music_player, current_list, self._on_music_list_saved
         )
 
+    def open_timeline_viewer(self):
+        """タイムラインビューアーを開く"""
+        # 既に開いている場合は前面に表示
+        if self.timeline_window is not None:
+            try:
+                self.timeline_window.window.lift()
+                self.timeline_window.window.focus_force()
+                self.log(
+                    {
+                        "level": "INFO",
+                        "message": "タイムラインビューアーを前面に表示しました",
+                    }
+                )
+                return
+            except:
+                # ウィンドウが閉じられている場合
+                self.timeline_window = None
+
+        from gui.timeline_viewer_window import TimelineViewerWindow
+
+        # 音楽リストを取得
+        music_list = self.music_player.get_music_list()
+
+        # 単一ファイルの場合もリスト化
+        if not music_list and self.audio_path.get():
+            music_list = [self.audio_path.get()]
+
+        # インターバルを取得
+        interval = self.music_player.get_interval()
+
+        # タイムラインビューアーを開く
+        self.timeline_window = TimelineViewerWindow(
+            self.master, music_list, self.schedule, self.total_time, interval
+        )
+
+        # ウィンドウが閉じられた時にNoneをセット
+        self.timeline_window.window.protocol(
+            "WM_DELETE_WINDOW", self._on_timeline_window_close
+        )
+
+        self.log({"level": "INFO", "message": "タイムラインビューアーを開きました"})
+
+    def _on_timeline_window_close(self):
+        """タイムラインウィンドウが閉じられた時のコールバック"""
+        if self.timeline_window:
+            self.timeline_window.window.destroy()
+            self.timeline_window = None
+
     def _on_music_list_saved(self, music_list, interval=0.0):
         """音楽リストが保存された時のコールバック"""
         # 音楽リストを設定
@@ -559,6 +616,7 @@ class TelloApp:
                 }
             )
             self.start_btn["state"] = "normal"
+            self.timeline_viewer_btn["state"] = "normal"
             self.show_status.set(f"解析完了 (予想時間: {self.total_time:.2f}秒)")
 
         else:
