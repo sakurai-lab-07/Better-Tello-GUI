@@ -62,6 +62,7 @@ class TelloApp:
         self.show_thread = None
         self.stop_event = threading.Event()
         self.timeline_window = None  # タイムラインウィンドウの参照
+        self.controllers = {}  # ドローンコントローラーの辞書
 
         # 音楽プレイヤーの初期化
         from music_player import MusicPlayer
@@ -229,6 +230,14 @@ class TelloApp:
             state="disabled",
         )
         self.timeline_viewer_btn.pack(fill="x", pady=(5, 5))
+
+        self.connect_btn = ttk.Button(
+            action_frame,
+            text="📡 ドローンに接続",
+            command=self.connect_drones,
+            state="disabled",
+        )
+        self.connect_btn.pack(fill="x", pady=(5, 5))
 
         self.start_btn = ttk.Button(
             action_frame,
@@ -612,12 +621,12 @@ class TelloApp:
             self.log(
                 {
                     "level": "INFO",
-                    "message": "解析に成功しました。ショーを開始できます。",
+                    "message": "解析に成功しました。ドローンに接続してください。",
                 }
             )
-            self.start_btn["state"] = "normal"
             self.timeline_viewer_btn["state"] = "normal"
-            self.show_status.set(f"解析完了 (予想時間: {self.total_time:.2f}秒)")
+            self.connect_btn["state"] = "normal"
+            self.show_status.set(f"解析完了。ドローンに接続してください。")
 
         else:
             self.schedule_text.insert(
@@ -635,11 +644,16 @@ class TelloApp:
         self.schedule_text.config(state="disabled")
 
     # ========================================================================
-    # ショー実行制御
+    # ドローン接続
     # ========================================================================
 
-    def start_show(self):
-        """ドローンショーを開始"""
+    def connect_drones(self):
+        """ドローンに接続"""
+        from show_runner import ShowRunner
+
+        self.connect_btn["state"] = "disabled"
+        self.show_status.set("ドローンに接続中...")
+
         drones_config = [
             {"name": w["name"], "pc_ip": w["ip_widget"].get()}
             for w in self.drone_entry_widgets
@@ -647,13 +661,40 @@ class TelloApp:
 
         if not all(c["pc_ip"] for c in drones_config):
             messagebox.showerror(
-                "エラー", "開始前に、すべてのIPアドレスを入力してください。"
+                "エラー", "接続前に、すべてのIPアドレスを入力してください。"
+            )
+            self.connect_btn["state"] = "normal"
+            self.show_status.set("解析完了。ドローンに接続してください。")
+            return
+
+        # ShowRunnerを使って接続
+        show_runner = ShowRunner(
+            drones_config,
+            self.schedule,
+            self.stop_event,
+            self.log_queue,
+            self.total_time,
+        )
+        threading.Thread(target=show_runner.connect).start()
+
+    # ========================================================================
+    # ショー実行制御
+    # ========================================================================
+
+    def start_show(self):
+        """ドローンショーを開始"""
+        from show_runner import ShowRunner
+
+        if not self.controllers:
+            messagebox.showerror(
+                "エラー", "ドローンに接続してからショーを開始してください。"
             )
             return
 
         # UIの状態を更新
         self.start_btn["state"] = "disabled"
         self.parse_btn["state"] = "disabled"
+        self.connect_btn["state"] = "disabled"
         self.stop_btn["state"] = "normal"
         self.stop_event.clear()
         self.show_status.set("ショー実行中...")
@@ -664,17 +705,16 @@ class TelloApp:
             # ドローンのtakeoffコマンドの実行時間（約3秒）を考慮して遅延
             self.music_player.play(delay=3.0)
 
-        # ショーを別スレッドで実行
-        self.show_thread = threading.Thread(
-            target=run_show_worker,
-            args=(
-                drones_config,
-                self.schedule,
-                self.stop_event,
-                self.log_queue,
-                self.total_time,
-            ),
+        # ShowRunnerを使ってショーを実行（既存のコントローラーを使用）
+        show_runner = ShowRunner(
+            None,  # drones_configは不要（既にcontrollersがある）
+            self.schedule,
+            self.stop_event,
+            self.log_queue,
+            self.total_time,
+            self.controllers,  # 接続済みのコントローラーを渡す
         )
+        self.show_thread = threading.Thread(target=show_runner.run_show)
         self.show_thread.start()
 
     def emergency_stop(self):

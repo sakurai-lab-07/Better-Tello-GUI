@@ -8,6 +8,135 @@ import traceback
 from tello_controller import TelloController
 
 
+class ShowRunner:
+    """ドローンショー実行クラス"""
+
+    def __init__(
+        self,
+        drones_config,
+        schedule,
+        stop_event,
+        log_queue,
+        total_time,
+        controllers=None,
+    ):
+        """
+        ShowRunnerの初期化
+
+        Args:
+            drones_config: ドローン設定のリスト（接続時に使用）
+            schedule: 実行スケジュール
+            stop_event: 停止イベント
+            log_queue: ログキュー
+            total_time: ショーの総実行時間
+            controllers: 既存のコントローラー辞書（省略可）
+        """
+        self.drones_config = drones_config
+        self.schedule = schedule
+        self.stop_event = stop_event
+        self.log_queue = log_queue
+        self.total_time = total_time
+        self.controllers = controllers if controllers is not None else {}
+
+    def log(self, log_item):
+        """ログをキューに追加"""
+        self.log_queue.put(log_item)
+
+    def connect(self):
+        """ドローンに接続"""
+        try:
+            self.log(
+                {"level": "INFO", "message": "--- ドローンへの接続を開始します... ---"}
+            )
+
+            # スケジュールに含まれるドローンを特定
+            drone_names = set(
+                evt["target"]
+                for evt in self.schedule
+                if evt.get("type") in ["COMMAND", "WAIT", "LAND"]
+            )
+            drones_to_init = [c for c in self.drones_config if c["name"] in drone_names]
+
+            if not drones_to_init:
+                self.log(
+                    {
+                        "level": "WARNING",
+                        "message": "タイムラインに登場するドローンが設定されていません。",
+                    }
+                )
+                self.log({"type": "connection_fail"})
+                return
+
+            threads, temp_controllers = [], {}
+            for i, config in enumerate(drones_to_init):
+                controller = TelloController(
+                    config["pc_ip"], config["name"], i, self.log_queue
+                )
+                temp_controllers[config["name"]] = controller
+                threads.append(
+                    threading.Thread(target=controller.send_command, args=("command",))
+                )
+
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            if all(
+                c.response and "ok" in c.response for c in temp_controllers.values()
+            ):
+                self.log(
+                    {"type": "connection_success", "controllers": temp_controllers}
+                )
+            else:
+                self.log(
+                    {
+                        "level": "ERROR",
+                        "message": "いくつかのドローンとの接続に失敗しました。IPアドレスを確認してください。",
+                    }
+                )
+                self.log({"type": "connection_fail"})
+                for c in temp_controllers.values():
+                    c.close()
+        except Exception as e:
+            self.log({"level": "ERROR", "message": f"接続中にエラーが発生: {e}"})
+            self.log({"type": "connection_fail"})
+
+    def run_show(self):
+        """ドローンショーを実行"""
+        try:
+            # UIのハイライトをクリア
+            self.log({"type": "clear_highlight"})
+
+            # 初期コマンドの実行（command, takeoff）
+            _execute_initial_commands(self.controllers, self.stop_event, self.log_queue)
+
+            if self.stop_event.is_set():
+                raise threading.ThreadError("離陸中に停止イベントが発生しました。")
+
+            # スケジュールの実行
+            _execute_schedule(
+                self.controllers,
+                self.schedule,
+                self.stop_event,
+                self.log_queue,
+                self.total_time,
+            )
+
+        except Exception as e:
+            self.log(
+                {
+                    "level": "ERROR",
+                    "message": f"\n--- 実行中にエラーが発生しました: {e} ---",
+                }
+            )
+            self.log({"level": "ERROR", "message": traceback.format_exc()})
+
+        finally:
+            # クリーンアップ処理
+            _cleanup_controllers(self.controllers, self.log_queue)
+
+
 def run_show_worker(drones_config, schedule, stop_event, log_queue, total_time):
     """
     ドローンショーを実行するワーカー関数（別スレッドで実行）
@@ -31,9 +160,11 @@ def run_show_worker(drones_config, schedule, stop_event, log_queue, total_time):
             }
         )
 
-        # スケジュールに含まれるドローンを特定
+        # スケジュールに含まれるドローンを特定（LANDイベントも含める）
         drone_names_in_schedule = set(
-            evt["target"] for evt in schedule if evt.get("type") in ["COMMAND", "WAIT"]
+            evt["target"]
+            for evt in schedule
+            if evt.get("type") in ["COMMAND", "WAIT", "LAND"]
         )
 
         # 必要なドローンのコントローラーを初期化
@@ -178,6 +309,24 @@ def _process_events(controllers, schedule, exec_time, stop_event, log_queue):
                     target=controllers[target].send_command, args=(command,)
                 )
                 threads.append(thread)
+
+        elif event["type"] == "LAND":
+            # スケジュールされた着陸イベントの処理
+            cmd = event
+            command = cmd.get("command", "land")
+            target_text = cmd.get("text", "")
+            log_queue.put(
+                {
+                    "level": "INFO",
+                    "message": f"--- スケジュールされた着陸を実行 ---",
+                }
+            )
+            for c_name, c_controller in controllers.items():
+                if c_name in target_text:  # テキストに対象ドローン名が含まれていれば
+                    thread = threading.Thread(
+                        target=c_controller.send_command, args=(command,)
+                    )
+                    threads.append(thread)
 
     # コマンド送信スレッドを一斉に開始
     for t in threads:

@@ -46,10 +46,6 @@ class TelloController:
         self.response_thread.daemon = True
         self.response_thread.start()
 
-        self.log(
-            {"level": "INFO", "message": f"[{self.name}] コントローラー初期化完了。"}
-        )
-
     def log(self, log_item):
         """ログをキューに追加"""
         self.log_queue.put(log_item)
@@ -100,7 +96,9 @@ class TelloController:
 
             time.sleep(0.1)
 
-        # 応答の評価
+            # 応答の評価
+            time.sleep(0.1)
+
         if "ok" in self.response or command.startswith("land"):
             self.log({"level": "SUCCESS", "message": f"[{self.name}] 応答: OK"})
             return True
@@ -115,6 +113,3 @@ class TelloController:
         self.stop_event.set()
         self.socket.close()
         self.response_thread.join(timeout=1)
-        self.log(
-            {"level": "INFO", "message": f"[{self.name}] コントローラーを閉じました。"}
-        )
