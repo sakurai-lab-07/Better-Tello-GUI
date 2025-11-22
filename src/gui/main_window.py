@@ -427,10 +427,11 @@ class TelloApp:
         path = filedialog.askopenfilename(
             title="音楽ファイルを選択",
             filetypes=[
-                ("音楽ファイル", "*.mp3;*.wav;*.ogg"),
+                ("音楽ファイル", "*.mp3;*.wav;*.ogg;*.flac"),
                 ("MP3ファイル", "*.mp3"),
                 ("WAVファイル", "*.wav"),
                 ("OGGファイル", "*.ogg"),
+                ("FLACファイル", "*.flac"),
                 ("すべてのファイル", "*.*"),
             ],
         )

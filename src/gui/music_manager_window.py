@@ -250,10 +250,11 @@ class MusicManagerWindow:
         paths = filedialog.askopenfilenames(
             title="音楽ファイルを選択（複数選択可）",
             filetypes=[
-                ("音楽ファイル", "*.mp3;*.wav;*.ogg"),
+                ("音楽ファイル", "*.mp3;*.wav;*.ogg;*.flac"),
                 ("MP3ファイル", "*.mp3"),
                 ("WAVファイル", "*.wav"),
                 ("OGGファイル", "*.ogg"),
+                ("FLACファイル", "*.flac"),
                 ("すべてのファイル", "*.*"),
             ],
         )
