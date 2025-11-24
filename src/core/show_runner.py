@@ -5,7 +5,8 @@
 import time
 import threading
 import traceback
-from tello_controller import TelloController
+# coreパッケージの中から読み込むように修正
+from core.tello_controller import TelloController
 
 
 class ShowRunner:
