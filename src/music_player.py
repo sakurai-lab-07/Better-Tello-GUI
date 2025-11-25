@@ -7,7 +7,7 @@ pygameを使用して音楽ファイルの再生、停止、音量制御を行�
 
 import threading
 import time
-from typing import Optional
+from typing import Optional, List
 
 
 class MusicPlayer:
@@ -29,6 +29,10 @@ class MusicPlayer:
         self.is_playing = False
         self.play_thread = None
         self.stop_requested = False
+        self.music_list = []  # メドレー用の音楽リスト
+        self.current_index = 0  # 現在再生中の曲のインデックス
+        self.current_music = None  # 単一ファイル再生用
+        self.interval_seconds = 0.0  # 曲間インターバル（秒）
 
         try:
             import pygame
@@ -167,3 +171,127 @@ class MusicPlayer:
         except Exception as e:
             if self.log_callback:
                 self.log_callback({"level": "ERROR", "message": f"音量設定エラー: {e}"})
+
+    def set_music_list(self, music_list: List[str]):
+        """
+        メドレー用の音楽リストを設定
+
+        Args:
+            music_list: 音楽ファイルパスのリスト
+        """
+        self.music_list = music_list.copy() if music_list else []
+        self.current_index = 0
+
+    def set_music(self, music_path: str):
+        """
+        単一の音楽ファイルを設定
+
+        Args:
+            music_path: 音楽ファイルのパス
+        """
+        self.current_music = music_path
+
+    def get_interval(self) -> float:
+        """
+        曲間インターバルを取得
+
+        Returns:
+            インターバル秒数
+        """
+        return self.interval_seconds
+
+    def set_interval(self, seconds: float):
+        """
+        曲間インターバルを設定
+
+        Args:
+            seconds: インターバル秒数（0.0以上）
+        """
+        self.interval_seconds = max(0.0, seconds)
+
+    def play_medley(self, delay_seconds: float = 0.0):
+        """
+        メドレーを再生
+
+        Args:
+            delay_seconds: 再生開始までの遅延時間（秒）
+        """
+        if not self.available or not self.music_list:
+            return
+
+        if self.is_playing:
+            self.stop()
+
+        self.stop_requested = False
+        self.current_index = 0
+        self.play_thread = threading.Thread(
+            target=self._play_medley, args=(delay_seconds,), daemon=True
+        )
+        self.play_thread.start()
+
+    def _play_medley(self, delay_seconds: float):
+        """
+        メドレーを順番に再生する内部メソッド
+
+        Args:
+            delay_seconds: 最初の曲再生開始までの遅延時間（秒）
+        """
+        try:
+            # 遅延待機
+            if delay_seconds > 0:
+                time.sleep(delay_seconds)
+
+            if self.stop_requested:
+                return
+
+            # 各曲を順番に再生
+            for i, audio_path in enumerate(self.music_list):
+                if self.stop_requested:
+                    break
+
+                self.current_index = i
+
+                # 曲を読み込んで再生
+                self.pygame.mixer.music.load(audio_path)
+                self.pygame.mixer.music.play()
+                self.is_playing = True
+
+                filename = audio_path.split("/")[-1].split("\\")[-1]
+                if self.log_callback:
+                    self.log_callback(
+                        {
+                            "level": "INFO",
+                            "message": f"♪ {i + 1}/{len(self.music_list)}: {filename}",
+                        }
+                    )
+
+                # 再生終了まで待機
+                while self.pygame.mixer.music.get_busy() and not self.stop_requested:
+                    time.sleep(0.1)
+
+                # インターバル待機（最後の曲の後は待機しない）
+                if (
+                    i < len(self.music_list) - 1
+                    and self.interval_seconds > 0
+                    and not self.stop_requested
+                ):
+                    if self.log_callback:
+                        self.log_callback(
+                            {
+                                "level": "INFO",
+                                "message": f"⏱️ インターバル: {self.interval_seconds}秒",
+                            }
+                        )
+                    time.sleep(self.interval_seconds)
+
+            self.is_playing = False
+
+            if not self.stop_requested and self.log_callback:
+                self.log_callback({"level": "INFO", "message": "♪ メドレー再生完了"})
+
+        except Exception as e:
+            self.is_playing = False
+            if self.log_callback:
+                self.log_callback(
+                    {"level": "ERROR", "message": f"メドレー再生エラー: {e}"}
+                )

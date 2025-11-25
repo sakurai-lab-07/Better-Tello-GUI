@@ -14,6 +14,8 @@ FONT_MONOSPACE = ("Consolas", 10)
 COLOR_PRIMARY = "#0078D7"
 COLOR_PRIMARY_HOVER = "#005f9e"
 COLOR_PRIMARY_DISABLED = "#5a9fd4"
+COLOR_ACCENT = "#0078D7"
+COLOR_ACCENT_HOVER = "#005f9e"
 COLOR_DANGER = "#d13438"
 COLOR_DANGER_HOVER = "#a4262c"
 COLOR_DANGER_DISABLED = "#e89c9f"
@@ -36,7 +38,14 @@ CONFIG_FILENAME = "tello_config.json"
 
 # ファイル形式
 SUPPORTED_PROJECT_FILES = [("Scratch プロジェクト", "*.sb3")]
-SUPPORTED_AUDIO_FILES = [("音声ファイル", "*.mp3 *.wav *.ogg")]
+SUPPORTED_AUDIO_FILES = [
+    ("音楽ファイル", "*.mp3;*.wav;*.ogg;*.flac"),
+    ("MP3ファイル", "*.mp3"),
+    ("WAVファイル", "*.wav"),
+    ("OGGファイル", "*.ogg"),
+    ("FLACファイル", "*.flac"),
+    ("すべてのファイル", "*.*"),
+]
 
 # UI更新間隔（ミリ秒）
 LOG_QUEUE_UPDATE_INTERVAL = 100
