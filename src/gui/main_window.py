@@ -215,7 +215,16 @@ class TelloApp:
             command=self.parse_scratch_project,
             state="disabled",
         )
-        self.parse_btn.pack(fill="x")
+        self.parse_btn.pack(fill="x", pady=(0, 5))
+
+        # タイムラインビューアーボタン
+        self.timeline_viewer_btn = ttk.Button(
+            file_frame,
+            text="📊 タイムラインを表示",
+            command=self.open_timeline_viewer,
+            state="disabled",
+        )
+        self.timeline_viewer_btn.pack(fill="x")
 
     def _create_audio_selection_section(self, parent):
         """④ 音源ファイル選択セクションを作成"""
@@ -512,6 +521,25 @@ class TelloApp:
             self.audio_path_label.configure(text="音楽ファイルが選択されていません")
             self.log({"level": LOG_LEVEL_INFO, "message": "音楽設定をクリアしました"})
 
+    def open_timeline_viewer(self):
+        """タイムラインビューアーウィンドウを開く"""
+        if not self.schedule:
+            messagebox.showwarning(
+                "警告",
+                "タイムラインが生成されていません。\n先にScratchファイルを解析してください。",
+            )
+            return
+
+        from gui.timeline_viewer_window import TimelineViewerWindow
+
+        TimelineViewerWindow(
+            self.master,
+            self.schedule,
+            self.total_time,
+            self.music_list,
+            self.music_player,
+        )
+
     def parse_scratch_project(self):
         """Scratchプロジェクトを解析してタイムラインを生成"""
         path = self.sb3_path.get()
@@ -578,6 +606,9 @@ class TelloApp:
                 }
             )
             self.connect_btn["state"] = "normal"
+            self.timeline_viewer_btn["state"] = (
+                "normal"  # タイムラインビューアーボタンを有効化
+            )
             self.show_status.set("解析完了。ドローンに接続してください。")
         else:
             self.schedule_text.insert(
@@ -722,6 +753,7 @@ class TelloApp:
         self.connect_btn["state"] = "disabled"
         self.start_btn["state"] = "disabled"
         self.stop_btn["state"] = "disabled"
+        self.timeline_viewer_btn["state"] = "disabled"
         self.connect_btn.config(text="📡 ドローンに接続")
         self.show_status.set("ファイル選択済み。解析してください。")
 
