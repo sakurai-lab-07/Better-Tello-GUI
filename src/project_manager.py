@@ -81,14 +81,26 @@ class ProjectManager:
                     project_data["sb3_filename"] = os.path.basename(sb3_path)
                     self._log("INFO", f".sb3ファイルを埋め込みました: {sb3_path}")
 
-            # 音楽ファイルを埋め込み（Base64エンコード）
+            # 音楽ファイルを埋め込み(Base64エンコード)またはYouTube URLを保存
             if music_list:
                 for music_path in music_list:
-                    if os.path.exists(music_path):
+                    # YouTube URLかどうかをチェック
+                    if music_path.startswith(("http://", "https://")):
+                        # YouTube URLはそのまま保存
+                        project_data["music"]["list"].append(
+                            {
+                                "type": "url",
+                                "url": music_path,
+                            }
+                        )
+                        self._log("INFO", f"YouTube URLを保存しました: {music_path}")
+                    elif os.path.exists(music_path):
+                        # ローカルファイルはBase64エンコードして埋め込み
                         with open(music_path, "rb") as f:
                             music_data = f.read()
                             project_data["music"]["list"].append(
                                 {
+                                    "type": "file",
                                     "filename": os.path.basename(music_path),
                                     "data": base64.b64encode(music_data).decode(
                                         "utf-8"
@@ -163,18 +175,32 @@ class ProjectManager:
                 result["sb3_path"] = str(sb3_temp_path)
                 self._log("INFO", f".sb3ファイルを復元しました: {sb3_temp_path}")
 
-            # 音楽ファイルを復元
+            # 音楽ファイル/URLを復元
             music_list = project_data.get("music", {}).get("list", [])
             for music_item in music_list:
-                music_filename = music_item.get("filename")
-                music_data_b64 = music_item.get("data")
-                if music_filename and music_data_b64:
-                    music_temp_path = temp_dir / music_filename
-                    music_data = base64.b64decode(music_data_b64)
-                    with open(music_temp_path, "wb") as f:
-                        f.write(music_data)
-                    result["music_paths"].append(str(music_temp_path))
-                    self._log("INFO", f"音楽ファイルを復元しました: {music_temp_path}")
+                item_type = music_item.get(
+                    "type", "file"
+                )  # 旧形式対応のため既定値はfile
+
+                if item_type == "url":
+                    # YouTube URLはそのまま追加
+                    url = music_item.get("url")
+                    if url:
+                        result["music_paths"].append(url)
+                        self._log("INFO", f"YouTube URLを読み込みました: {url}")
+                else:
+                    # ローカルファイルを復元
+                    music_filename = music_item.get("filename")
+                    music_data_b64 = music_item.get("data")
+                    if music_filename and music_data_b64:
+                        music_temp_path = temp_dir / music_filename
+                        music_data = base64.b64decode(music_data_b64)
+                        with open(music_temp_path, "wb") as f:
+                            f.write(music_data)
+                        result["music_paths"].append(str(music_temp_path))
+                        self._log(
+                            "INFO", f"音楽ファイルを復元しました: {music_temp_path}"
+                        )
 
             self._log("INFO", f"プロジェクトを読み込みました: {project_path}")
             return result

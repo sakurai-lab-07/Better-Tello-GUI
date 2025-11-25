@@ -4,6 +4,9 @@
 
 import threading
 import time
+import os
+import tempfile
+from pathlib import Path
 
 try:
     import pygame
@@ -11,6 +14,13 @@ try:
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
+
+try:
+    import yt_dlp
+
+    YT_DLP_AVAILABLE = True
+except ImportError:
+    YT_DLP_AVAILABLE = False
 
 
 class MusicPlayer:
@@ -25,11 +35,14 @@ class MusicPlayer:
         """
         self.log_queue = log_queue
         self.music_path = None
-        self.music_list = []  # メドレー用の音楽リスト
+        self.music_list = []  # メドレー用の音楽リスト（ファイルパスまたはYouTube URL）
         self.interval_seconds = 0.0  # 曲間のインターバル（秒）
         self.is_playing = False
         self.stop_event = threading.Event()
         self.pygame_available = PYGAME_AVAILABLE
+        self.yt_dlp_available = YT_DLP_AVAILABLE
+        self.temp_dir = Path(tempfile.gettempdir()) / "tello_youtube_cache"
+        self.temp_dir.mkdir(exist_ok=True)
 
         # pygameが利用可能な場合のみ初期化
         if self.pygame_available:
@@ -50,23 +63,87 @@ class MusicPlayer:
         if self.log_queue:
             self.log_queue.put({"level": level, "message": message})
 
+    def _is_youtube_url(self, url_or_path):
+        """YouTube URLかどうかを判定"""
+        if not isinstance(url_or_path, str):
+            return False
+        return url_or_path.startswith("http") and (
+            "youtube" in url_or_path or "youtu.be" in url_or_path
+        )
+
+    def _download_youtube_audio(self, youtube_url):
+        """YouTube URLから音源を一時ファイルにキャッシュ"""
+        if not self.yt_dlp_available:
+            self._log("ERROR", "yt-dlpがインストールされていません。")
+            return None
+
+        try:
+            # 一時ファイル名を生成（URLのハッシュを使用）
+            import hashlib
+
+            url_hash = hashlib.md5(youtube_url.encode()).hexdigest()
+            temp_file = self.temp_dir / f"yt_{url_hash}.mp3"
+
+            # 既にキャッシュがある場合はそれを使用
+            if temp_file.exists():
+                self._log("INFO", "キャッシュされた音源を使用します")
+                return str(temp_file)
+
+            self._log("INFO", "YouTube音源をキャッシュ中...")
+
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+                "outtmpl": str(temp_file.with_suffix("")),
+                "quiet": True,
+                "no_warnings": True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([youtube_url])
+
+            if temp_file.exists():
+                self._log("INFO", "YouTube音源のキャッシュ完了")
+                return str(temp_file)
+            else:
+                self._log("ERROR", "音源ファイルが見つかりません")
+                return None
+
+        except Exception as e:
+            self._log("ERROR", f"YouTube音源のキャッシュに失敗: {e}")
+            return None
+
+    def _get_stream_url(self, youtube_url):
+        """YouTube URLから実際のストリーミングURLを取得（廃止: 一時キャッシュに変更）"""
+        # pygameはURLから直接再生できないため、一時ファイルにキャッシュ
+        return self._download_youtube_audio(youtube_url)
+
     def set_music(self, music_path):
         """
-        再生する音楽ファイルを設定（単一ファイル）
+        再生する音楽ファイルまたはYouTube URLを設定（単一ファイル）
 
         Args:
-            music_path: 音楽ファイルのパス
+            music_path: 音楽ファイルのパスまたはYouTube URL
         """
         self.music_path = music_path
         if music_path:
-            self._log("INFO", f"音楽ファイルを設定: {music_path}")
+            if self._is_youtube_url(music_path):
+                self._log("INFO", f"YouTube URLを設定: {music_path}")
+            else:
+                self._log("INFO", f"音楽ファイルを設定: {music_path}")
 
     def set_music_list(self, music_list):
         """
         メドレー再生用の音楽リストを設定
 
         Args:
-            music_list: 音楽ファイルパスのリスト
+            music_list: 音楽ファイルパスまたはYouTube URLのリスト
         """
         self.music_list = music_list.copy() if music_list else []
         if self.music_list:
@@ -114,7 +191,7 @@ class MusicPlayer:
             self._log("WARNING", "音楽ファイルが設定されていません。")
 
     def _play_single(self, delay=0):
-        """単一の音楽ファイルを再生"""
+        """単一の音楽ファイルまたはYouTube URLを再生"""
 
         def _play_thread():
             try:
@@ -126,8 +203,17 @@ class MusicPlayer:
                 if self.stop_event.is_set():
                     return
 
+                # YouTube URLの場合は一時ファイルにダウンロード
+                music_source = self.music_path
+                if self._is_youtube_url(self.music_path):
+                    self._log("INFO", "YouTube音源を取得中...")
+                    music_source = self._get_stream_url(self.music_path)
+                    if not music_source:
+                        self._log("ERROR", "YouTube音源の取得に失敗しました。")
+                        return
+
                 # 音楽をロードして再生
-                pygame.mixer.music.load(self.music_path)
+                pygame.mixer.music.load(music_source)
                 pygame.mixer.music.play()
                 self.is_playing = True
                 self._log("SUCCESS", "🎵 音楽の再生を開始しました。")
@@ -176,14 +262,29 @@ class MusicPlayer:
                     if self.stop_event.is_set():
                         break
 
-                    # ファイル名を取得
-                    import os
-
-                    filename = os.path.basename(music_path)
+                    # ファイル名またはタイトルを取得
+                    if self._is_youtube_url(music_path):
+                        filename = f"YouTube: {music_path[:50]}..."
+                    else:
+                        filename = os.path.basename(music_path)
 
                     try:
+                        # YouTube URLの場合はストリーミングURLを取得
+                        music_source = music_path
+                        if self._is_youtube_url(music_path):
+                            self._log(
+                                "INFO",
+                                f"♪ {i}/{len(self.music_list)}: YouTube音源を取得中...",
+                            )
+                            music_source = self._get_stream_url(music_path)
+                            if not music_source:
+                                self._log(
+                                    "ERROR", f"曲 {i} のYouTube音源取得に失敗しました。"
+                                )
+                                continue
+
                         # 音楽をロードして再生
-                        pygame.mixer.music.load(music_path)
+                        pygame.mixer.music.load(music_source)
                         pygame.mixer.music.play()
                         self._log("INFO", f"♪ {i}/{len(self.music_list)}: {filename}")
 

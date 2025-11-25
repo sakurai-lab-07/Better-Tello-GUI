@@ -16,6 +16,7 @@ from config import (
     FONT_BOLD_LARGE,
     FONT_HEADER,
 )
+from youtube_downloader import YouTubeDownloader
 
 
 class MusicManagerWindow:
@@ -37,6 +38,9 @@ class MusicManagerWindow:
         self.original_music_list = music_list.copy()  # 元のリストを保持
         self.on_save_callback = on_save_callback
         self.preview_index = None
+
+        # YouTubeダウンローダーの初期化
+        self.youtube_downloader = YouTubeDownloader()
 
         # インターバル設定（デフォルト0秒）
         self.interval_seconds = tk.DoubleVar(value=music_player.get_interval())
@@ -139,6 +143,9 @@ class MusicManagerWindow:
         ttk.Button(btn_frame, text="➕ 追加", command=self._add_music, width=12).pack(
             pady=2
         )
+        ttk.Button(
+            btn_frame, text="📺 YouTube", command=self._add_from_youtube, width=12
+        ).pack(pady=2)
         ttk.Button(btn_frame, text="🗑️ 削除", command=self._remove_music, width=12).pack(
             pady=2
         )
@@ -232,8 +239,14 @@ class MusicManagerWindow:
         self.listbox.delete(0, tk.END)
 
         for i, music_path in enumerate(self.music_list, 1):
-            filename = os.path.basename(music_path)
-            self.listbox.insert(tk.END, f"{i}. {filename}")
+            # YouTube URLの場合は特別な表示
+            if music_path.startswith("http") and (
+                "youtube" in music_path or "youtu.be" in music_path
+            ):
+                display_name = f"🎬 YouTube: {music_path[:50]}..."
+            else:
+                display_name = os.path.basename(music_path)
+            self.listbox.insert(tk.END, f"{i}. {display_name}")
 
         # 情報を更新
         if self.music_list:
@@ -269,6 +282,123 @@ class MusicManagerWindow:
             # 追加した最初のファイルを選択
             if len(self.music_list) > 0:
                 self.listbox.selection_set(len(self.music_list) - len(paths))
+
+    def _add_from_youtube(self):
+        """YouTube URLから音源を追加"""
+        if not self.youtube_downloader.is_available():
+            messagebox.showerror(
+                "エラー",
+                "yt-dlpがインストールされていません。\n\n"
+                "以下のコマンドでインストールしてください:\n"
+                "pip install yt-dlp",
+                parent=self.window,
+            )
+            return
+
+        # URL入力ダイアログを作成
+        dialog = tk.Toplevel(self.window)
+        dialog.title("YouTube音源設定")
+        dialog.geometry("500x200")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        # 中央に配置
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        # コンテンツフレーム
+        content_frame = ttk.Frame(dialog, padding="20")
+        content_frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            content_frame,
+            text="YouTube動画のURLを入力してください:",
+            font=FONT_NORMAL,
+        ).pack(anchor="w", pady=(0, 5))
+
+        ttk.Label(
+            content_frame,
+            text="※再生時に音声データを一時ファイルとしてキャッシュします",
+            font=("Arial", 8),
+            foreground="gray",
+        ).pack(anchor="w", pady=(0, 10))
+
+        url_entry = ttk.Entry(content_frame, font=FONT_NORMAL)
+        url_entry.pack(fill="x", pady=(0, 10))
+        url_entry.focus()
+
+        # ステータスラベル
+        status_label = ttk.Label(content_frame, text="", foreground="gray")
+        status_label.pack(fill="x", pady=(0, 10))
+
+        # ボタンフレーム
+        button_frame = ttk.Frame(content_frame)
+        button_frame.pack(fill="x")
+
+        result = {"youtube_url": None}
+
+        def on_add():
+            url = url_entry.get().strip()
+            if not url:
+                messagebox.showwarning("警告", "URLを入力してください。", parent=dialog)
+                return
+
+            if not self.youtube_downloader.is_youtube_url(url):
+                messagebox.showerror(
+                    "エラー", "有効なYouTube URLではありません。", parent=dialog
+                )
+                return
+
+            # URL検証中の表示
+            status_label.config(text="YouTube動画情報を確認中...")
+            dialog.update()
+
+            # 動画情報を取得
+            video_info = self.youtube_downloader.get_video_info(url)
+
+            if video_info:
+                result["youtube_url"] = url
+                result["title"] = video_info.get("title", "Unknown")
+                messagebox.showinfo(
+                    "成功",
+                    f"YouTube動画を追加しました。\n\nタイトル: {result['title']}",
+                    parent=dialog,
+                )
+                dialog.destroy()
+            else:
+                status_label.config(text="")
+                messagebox.showerror(
+                    "エラー",
+                    "動画情報の取得に失敗しました。\nURLを確認してください。",
+                    parent=dialog,
+                )
+
+        def on_cancel():
+            dialog.destroy()
+
+        ttk.Button(button_frame, text="追加", command=on_add).pack(
+            side="left", fill="x", expand=True, padx=(0, 5)
+        )
+
+        ttk.Button(button_frame, text="キャンセル", command=on_cancel).pack(
+            side="left", fill="x", expand=True
+        )
+
+        # Enterキーで追加
+        url_entry.bind("<Return>", lambda e: on_add())
+
+        dialog.wait_window()
+
+        # URLが追加された場合、リストに追加
+        if result["youtube_url"]:
+            self.music_list.append(result["youtube_url"])
+            self._refresh_list()
+
+            # 追加したファイルを選択
+            if len(self.music_list) > 0:
+                self.listbox.selection_set(len(self.music_list) - 1)
 
     def _remove_music(self):
         """選択中の音楽を削除"""

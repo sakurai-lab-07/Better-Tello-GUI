@@ -1,29 +1,37 @@
 """
-Tello Scratchドローンショー・コントローラー
+Tello Scratch ドローンショー・コントローラー
 メインエントリーポイント
 """
 
 import sys
+import os
 import tkinter as tk
 
-# DPI対応（Windows）
-if sys.platform == "win32":
-    try:
-        import ctypes
+# srcディレクトリをPythonパスに追加
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-
-# GUI起動
 from gui import TelloApp
 
 
 def main():
-    """アプリケーションのメイン関数"""
+    """アプリケーションのメインエントリーポイント"""
+    # Windows環境でのDPI対応
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+
+    # メインウィンドウの作成
     root = tk.Tk()
     app = TelloApp(root)
+
+    # ウィンドウ終了時の処理
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
+
+    # メインループ
     root.mainloop()
 
 
