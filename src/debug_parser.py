@@ -7,6 +7,7 @@ from scratch_parser import ScratchProjectParser
 # ダミーのログキュー
 dummy_queue = Queue()
 
+
 def main():
     if len(sys.argv) < 2:
         print("エラー: Scratchの.sb3ファイルのパスを指定してください。")
@@ -25,5 +26,6 @@ def main():
     print(f"\n--- 予想総時間 ---")
     print(f"{total_time:.2f}秒")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -462,7 +462,7 @@ class MusicManagerWindow:
         # 一時的に音楽リストをクリアして単一ファイルとして再生
         self.music_player.set_music_list([])  # メドレーリストをクリア
         self.music_player.set_music(self.music_list[index])  # 選択した曲を設定
-        self.music_player.play(delay=0)
+        self.music_player.play(self.music_list[index], delay_seconds=0)
 
         # ステータス更新
         filename = os.path.basename(self.music_list[index])

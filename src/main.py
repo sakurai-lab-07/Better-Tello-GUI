@@ -7,15 +7,11 @@ import sys
 import os
 import tkinter as tk
 
-# srcディレクトリをPythonパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from gui import TelloApp
 
 
-def main():
-    """アプリケーションのメインエントリーポイント"""
-    # Windows環境でのDPI対応
+def setup_dpi_awareness():
+    """Windows環境でDPI認識を設定"""
     if sys.platform == "win32":
         try:
             import ctypes
@@ -24,14 +20,20 @@ def main():
         except Exception:
             pass
 
-    # メインウィンドウの作成
+
+def main():
+    """アプリケーションのエントリーポイント"""
+    # DPI設定
+    setup_dpi_awareness()
+
+    # メインウィンドウ作成
     root = tk.Tk()
     app = TelloApp(root)
 
-    # ウィンドウ終了時の処理
+    # 終了処理を登録
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
 
-    # メインループ
+    # メインループ開始
     root.mainloop()
 
 

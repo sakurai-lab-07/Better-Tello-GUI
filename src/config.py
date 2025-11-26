@@ -1,48 +1,65 @@
 """
-設定と定数
+設定管理モジュール
+
+アプリケーション全体で使用される定数と設定値を管理します。
 """
 
-# -----------------------------------------------------------------------------
-# アプリケーション設定
-# -----------------------------------------------------------------------------
-CONFIG_FILE = "tello_config.json"
-
-# -----------------------------------------------------------------------------
-# Tello設定
-# -----------------------------------------------------------------------------
-# Scratch座標からTello座標への変換レート
-SCRATCH_TO_CM_RATE = 1
-
-# Telloの最小移動距離（cm）
-MIN_TELLO_MOVE = 20
-
-# 初期ホバリング高度（cm）
-INITIAL_HOVER_HEIGHT_CM = 80
-
-# Telloの移動速度（cm/秒）
-TELLO_HORIZONTAL_SPEED_CMS = 50.0
-TELLO_VERTICAL_SPEED_CMS = 40.0
-
-# Telloのネットワーク設定
-TELLO_IP = "192.168.10.1"
-TELLO_PORT = 8889
-PC_PORT_BASE = 9000
-
-# -----------------------------------------------------------------------------
-# GUIスタイル設定
-# -----------------------------------------------------------------------------
+# フォント設定
 FONT_NORMAL = ("Yu Gothic UI", 10)
 FONT_BOLD_LARGE = ("Yu Gothic UI", 12, "bold")
 FONT_HEADER = ("Yu Gothic UI", 10, "bold")
 FONT_MONOSPACE = ("Consolas", 10)
 
 # 色設定
-COLOR_BACKGROUND = "#f0f0f0"
+COLOR_PRIMARY = "#0078D7"
+COLOR_PRIMARY_HOVER = "#005f9e"
+COLOR_PRIMARY_DISABLED = "#5a9fd4"
 COLOR_ACCENT = "#0078D7"
 COLOR_ACCENT_HOVER = "#005f9e"
-COLOR_STOP = "#d13438"
-COLOR_STOP_HOVER = "#a4262c"
+COLOR_DANGER = "#d13438"
+COLOR_DANGER_HOVER = "#a4262c"
+COLOR_DANGER_DISABLED = "#e89c9f"
 COLOR_SUCCESS = "#28a745"
 COLOR_WARNING = "#ffc107"
 COLOR_ERROR = "#dc3545"
+COLOR_BACKGROUND = "#f0f0f0"
+COLOR_TEXT = "#333"
 COLOR_HIGHLIGHT = "#d0e9f8"
+
+# ウィンドウ設定
+WINDOW_TITLE = "Tello Scratch ドローンショー・コントローラー (最終安定版)"
+WINDOW_SIZE = "900x700"
+WINDOW_MIN_SIZE = (800, 600)
+MAIN_PADDING = 15
+
+# ドローン設定
+DEFAULT_DRONE_PREFIX = "Tello_"
+CONFIG_FILENAME = "tello_config.json"
+
+# ファイル形式
+SUPPORTED_PROJECT_FILES = [("Scratch プロジェクト", "*.sb3")]
+SUPPORTED_AUDIO_FILES = [
+    ("音楽ファイル", "*.mp3;*.wav;*.ogg;*.flac"),
+    ("MP3ファイル", "*.mp3"),
+    ("WAVファイル", "*.wav"),
+    ("OGGファイル", "*.ogg"),
+    ("FLACファイル", "*.flac"),
+    ("すべてのファイル", "*.*"),
+]
+
+# UI更新間隔（ミリ秒）
+LOG_QUEUE_UPDATE_INTERVAL = 100
+
+# ログレベル
+LOG_LEVEL_INFO = "INFO"
+LOG_LEVEL_SUCCESS = "SUCCESS"
+LOG_LEVEL_WARNING = "WARNING"
+LOG_LEVEL_ERROR = "ERROR"
+
+# タイムラインイベントタイプ
+EVENT_TYPE_TAKEOFF = "TAKEOFF"
+EVENT_TYPE_COMMAND = "COMMAND"
+EVENT_TYPE_WAIT = "WAIT"
+EVENT_TYPE_WARNING = "WARNING"
+EVENT_TYPE_LAND = "LAND"
+EVENT_TYPE_INFO = "INFO"

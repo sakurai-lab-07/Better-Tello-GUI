@@ -1,171 +1,190 @@
 """
-メインGUIウィンドウ
+メインウィンドウモジュール
+
+Tello Scratchドローンショーコントローラーのメインウィンドウを提供します。
 """
 
-import sys
 import json
-import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from queue import Queue
+import threading
 
+from scratch_parser import ScratchProjectParser
+from show_runner import ShowRunner
+from music_player import MusicPlayer
 from config import (
-    CONFIG_FILE,
     FONT_NORMAL,
     FONT_BOLD_LARGE,
     FONT_HEADER,
     FONT_MONOSPACE,
-)
-from config import COLOR_BACKGROUND, COLOR_ACCENT, COLOR_ACCENT_HOVER
-from config import (
-    COLOR_STOP,
-    COLOR_STOP_HOVER,
+    COLOR_PRIMARY,
+    COLOR_PRIMARY_HOVER,
+    COLOR_PRIMARY_DISABLED,
+    COLOR_DANGER,
+    COLOR_DANGER_HOVER,
+    COLOR_DANGER_DISABLED,
     COLOR_SUCCESS,
     COLOR_WARNING,
     COLOR_ERROR,
+    COLOR_BACKGROUND,
+    COLOR_TEXT,
     COLOR_HIGHLIGHT,
+    WINDOW_TITLE,
+    WINDOW_SIZE,
+    WINDOW_MIN_SIZE,
+    MAIN_PADDING,
+    DEFAULT_DRONE_PREFIX,
+    CONFIG_FILENAME,
+    SUPPORTED_PROJECT_FILES,
+    SUPPORTED_AUDIO_FILES,
+    LOG_QUEUE_UPDATE_INTERVAL,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_SUCCESS,
+    LOG_LEVEL_WARNING,
+    LOG_LEVEL_ERROR,
+    EVENT_TYPE_TAKEOFF,
+    EVENT_TYPE_COMMAND,
+    EVENT_TYPE_WAIT,
+    EVENT_TYPE_WARNING,
+    EVENT_TYPE_LAND,
+    EVENT_TYPE_INFO,
 )
-from scratch_parser import ScratchProjectParser
-from show_runner import run_show_worker
-from project_manager import ProjectManager
-from youtube_downloader import YouTubeDownloader
 
 
 class TelloApp:
-    """メインGUIアプリケーションクラス"""
+    """
+    Tello Scratchドローンショーコントローラーのメインアプリケーションクラス
+    """
 
     def __init__(self, master):
-        """アプリケーションの初期化"""
+        """
+        アプリケーションを初期化
+
+        Args:
+            master: Tkinterのルートウィンドウ
+        """
         self.master = master
-        self.master.title("Tello Scratch ドローンショー・コントローラー")
-        self.master.geometry("1200x1020")
-        self.master.minsize(850, 800)
-        self.master.configure(bg=COLOR_BACKGROUND)
+        self.master.title(WINDOW_TITLE)
+        self.master.geometry(WINDOW_SIZE)
+        self.master.minsize(*WINDOW_MIN_SIZE)
 
-        # フォント設定
-        self.font_normal = FONT_NORMAL
-        self.font_bold_large = FONT_BOLD_LARGE
-        self.font_header = FONT_HEADER
-        self.font_monospace = FONT_MONOSPACE
+        self.setup_styles()
 
-        # スタイル設定
-        self._configure_styles()
-
-        # 状態変数の初期化
+        # 内部状態変数
         self.drone_entry_widgets = []
         self.schedule = None
         self.total_time = 0.0
         self.time_to_line_map = {}
         self.last_highlighted_lines = None
         self.sb3_path = tk.StringVar()
-        self.audio_path = tk.StringVar()  # 音楽ファイルパス
+        self.audio_path = tk.StringVar()
         self.show_status = tk.StringVar(value="準備完了")
         self.log_queue = Queue()
         self.show_thread = None
         self.stop_event = threading.Event()
-        self.timeline_window = None  # タイムラインウィンドウの参照
-        self.controllers = {}  # ドローンコントローラーの辞書
+        self.controllers = {}
 
-        # 音楽プレイヤーの初期化
-        from music_player import MusicPlayer
+        # 音楽関連
+        self.music_list = []  # メドレー用の音楽リスト
+        self.is_medley_mode = False  # メドレーモードかどうか
 
-        self.music_player = MusicPlayer(log_queue=self.log_queue)
+        # 音楽プレイヤー初期化
+        self.music_player = MusicPlayer(log_callback=self.log)
 
-        # プロジェクトマネージャーの初期化
-        self.project_manager = ProjectManager(log_queue=self.log_queue)
-        self.current_project_path = None  # 現在開いているプロジェクトのパス
-
-        # YouTubeダウンローダーの初期化
-        self.youtube_downloader = YouTubeDownloader(log_queue=self.log_queue)
-
-        # UI構築と初期化
         self._create_widgets()
         self.load_config()
         self.process_log_queue()
 
-    def _configure_styles(self):
-        """UI要素のスタイルを設定"""
+    def setup_styles(self):
+        """スタイルとテーマを設定"""
+        self.font_normal = FONT_NORMAL
+        self.font_bold_large = FONT_BOLD_LARGE
+        self.font_header = FONT_HEADER
+        self.font_monospace = FONT_MONOSPACE
+
         s = ttk.Style()
         s.theme_use("clam")
 
         # 基本スタイル
-        s.configure("TFrame", background=COLOR_BACKGROUND)
         s.configure(
-            "TLabel",
-            background=COLOR_BACKGROUND,
-            foreground="black",
-            font=self.font_normal,
+            ".", background=COLOR_BACKGROUND, foreground="black", font=self.font_normal
         )
-        s.configure("Header.TLabel", font=self.font_header, foreground=COLOR_ACCENT)
-
-        # LabelFrame
+        s.configure("TFrame", background=COLOR_BACKGROUND)
+        s.configure("TLabel", background=COLOR_BACKGROUND, foreground="black")
+        s.configure("Header.TLabel", font=self.font_header, foreground=COLOR_PRIMARY)
         s.configure("TLabelframe", background=COLOR_BACKGROUND)
-        s.configure("TLabelframe.Label", font=self.font_bold_large, foreground="#333")
-
-        # ボタン
+        s.configure(
+            "TLabelframe.Label", font=self.font_bold_large, foreground=COLOR_TEXT
+        )
         s.configure("TButton", font=self.font_normal, padding=6)
+
+        # アクセントボタン
         s.configure(
             "Accent.TButton",
             font=self.font_normal,
             padding=8,
             foreground="white",
-            background=COLOR_ACCENT,
+            background=COLOR_PRIMARY,
         )
-        s.map("Accent.TButton", background=[("active", COLOR_ACCENT_HOVER)])
+        s.map(
+            "Accent.TButton",
+            background=[
+                ("active", COLOR_PRIMARY_HOVER),
+                ("disabled", COLOR_PRIMARY_DISABLED),
+            ],
+        )
+
+        # 停止ボタン
         s.configure(
             "Stop.TButton",
             font=self.font_normal,
             padding=8,
             foreground="white",
-            background=COLOR_STOP,
+            background=COLOR_DANGER,
         )
-        s.map("Stop.TButton", background=[("active", COLOR_STOP_HOVER)])
+        s.map(
+            "Stop.TButton",
+            background=[
+                ("active", COLOR_DANGER_HOVER),
+                ("disabled", COLOR_DANGER_DISABLED),
+            ],
+        )
 
     def _create_widgets(self):
-        """UI要素を作成"""
-        # メインフレーム
-        main_frame = ttk.Frame(self.master, padding="15")
+        """すべてのUIウィジェットを作成"""
+        main_frame = ttk.Frame(self.master, padding=MAIN_PADDING)
         main_frame.pack(fill="both", expand=True)
         main_frame.grid_rowconfigure(1, weight=1)
         main_frame.grid_columnconfigure(1, weight=1)
 
-        # 左側パネル
-        self._create_left_panel(main_frame)
-
-        # 右側パネル（ログとタイムライン）
-        self._create_right_panel(main_frame)
-
-    def _create_left_panel(self, parent):
-        """左側パネルを作成"""
-        left_frame = ttk.Frame(parent)
+        # 左カラム
+        left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
-        left_frame.grid_rowconfigure(2, weight=1)
 
-        # ① ドローン設定
         self._create_drone_config_section(left_frame)
+        self._create_project_selection_section(left_frame)
+        self._create_audio_selection_section(left_frame)
+        self._create_show_control_section(left_frame)
 
-        # ② プロジェクト選択
-        self._create_file_selection_section(left_frame)
-
-        # ③ ショー実行
-        self._create_action_section(left_frame)
+        # 右カラム
+        self._create_status_bar(main_frame)
+        self._create_log_panels(main_frame)
 
     def _create_drone_config_section(self, parent):
-        """ドローン設定セクションを作成"""
+        """① ドローン設定セクションを作成"""
         ip_frame = ttk.LabelFrame(parent, text="① ドローンの設定", padding="10")
         ip_frame.pack(fill="x", pady=(0, 15))
 
         self.ip_entry_frame = ttk.Frame(ip_frame)
         self.ip_entry_frame.pack(fill="x")
 
-        # ボタンフレーム
         ip_button_frame = ttk.Frame(ip_frame)
         ip_button_frame.pack(fill="x", pady=(10, 5))
 
         ttk.Button(ip_button_frame, text="＋ 追加", command=self.add_drone_entry).pack(
             side="left", expand=True, fill="x", padx=(0, 2)
         )
-
         ttk.Button(
             ip_button_frame, text="－ 削除", command=self.remove_drone_entry
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
@@ -182,9 +201,11 @@ class TelloApp:
         )
         self.connect_btn.pack(fill="x", pady=(5, 0))
 
-    def _create_file_selection_section(self, parent):
-        """プロジェクト選択セクションを作成"""
-        file_frame = ttk.LabelFrame(parent, text="② プロジェクト選択", padding="10")
+    def _create_project_selection_section(self, parent):
+        """② プロジェクト選択 & 解析セクションを作成"""
+        file_frame = ttk.LabelFrame(
+            parent, text="② プロジェクト選択 & 解析", padding="10"
+        )
         file_frame.pack(fill="x", pady=(0, 15))
 
         self.sb3_path_label = ttk.Label(
@@ -196,73 +217,57 @@ class TelloApp:
             file_frame, text="📂 Scratchファイルを開く", command=self.select_file
         ).pack(fill="x", pady=(0, 5))
 
-        # プロジェクト管理ボタン
-        project_btn_frame = ttk.Frame(file_frame)
-        project_btn_frame.pack(fill="x", pady=(5, 0))
-
-        ttk.Button(
-            project_btn_frame,
-            text="💾 プロジェクト保存",
-            command=self.save_project,
-        ).pack(side="left", fill="x", expand=True, padx=(0, 2))
-
-        ttk.Button(
-            project_btn_frame,
-            text="📁 プロジェクト読込",
-            command=self.load_project,
-        ).pack(side="left", fill="x", expand=True, padx=(2, 0))
-
         self.parse_btn = ttk.Button(
             file_frame,
             text="🔄 タイムラインを解析",
             command=self.parse_scratch_project,
             state="disabled",
         )
-        self.parse_btn.pack(fill="x", pady=(10, 0))
+        self.parse_btn.pack(fill="x", pady=(0, 5))
 
-    def _create_action_section(self, parent):
-        """ショー実行セクションを作成"""
-        action_frame = ttk.LabelFrame(parent, text="③ ショー実行", padding="10")
-        action_frame.pack(fill="x")
-
-        # 音楽管理セクション
-        music_label_frame = ttk.Frame(action_frame)
-        music_label_frame.pack(fill="x", pady=(0, 10))
-
-        ttk.Label(music_label_frame, text="🎵 音楽設定:").pack(anchor="w")
-        self.audio_info_label = ttk.Label(
-            music_label_frame,
-            text="設定されていません",
-            wraplength=230,
-            foreground="#666",
-        )
-        self.audio_info_label.pack(fill="x", pady=(2, 5))
-
-        # 音楽管理ボタン
-        music_btn_frame = ttk.Frame(music_label_frame)
-        music_btn_frame.pack(fill="x", pady=(0, 2))
-
-        ttk.Button(
-            music_btn_frame,
-            text="🎼 メドレー管理",
-            command=self.open_music_manager,
-        ).pack(side="left", fill="x", expand=True, padx=(0, 2))
-
-        ttk.Button(
-            music_btn_frame,
-            text="🎶 クイック選択",
-            command=self.select_audio_file,
-        ).pack(side="left", fill="x", expand=True, padx=(2, 0))
-
-        ttk.Separator(action_frame, orient="horizontal").pack(fill="x", pady=10)
-
+        # タイムラインビューアーボタン
         self.timeline_viewer_btn = ttk.Button(
-            action_frame,
-            text="🎬 タイムラインを表示",
+            file_frame,
+            text="📊 タイムラインを表示",
             command=self.open_timeline_viewer,
             state="disabled",
         )
-        self.timeline_viewer_btn.pack(fill="x", pady=(0, 5))
+        self.timeline_viewer_btn.pack(fill="x")
+
+    def _create_audio_selection_section(self, parent):
+        """④ 音源ファイル選択セクションを作成"""
+        audio_frame = ttk.LabelFrame(
+            parent, text="④ 音源ファイル (オプション)", padding="10"
+        )
+        audio_frame.pack(fill="x", pady=(0, 15))
+
+        self.audio_path_label = ttk.Label(
+            audio_frame, text="音楽ファイルが選択されていません", wraplength=230
+        )
+        self.audio_path_label.pack(fill="x", pady=(0, 10))
+
+        # メドレー管理ボタン
+        ttk.Button(
+            audio_frame, text="🎼 メドレー管理", command=self.open_music_manager
+        ).pack(fill="x", pady=(0, 5))
+
+        # クイック選択ボタン
+        ttk.Button(
+            audio_frame, text="🎶 クイック選択", command=self.select_audio_file
+        ).pack(fill="x")
+
+    def _create_show_control_section(self, parent):
+        """③ ショー実行セクションを作成"""
+        action_frame = ttk.LabelFrame(parent, text="③ ショー実行", padding="10")
+        action_frame.pack(fill="x", pady=(0, 15))
+
+        self.connect_btn = ttk.Button(
+            action_frame,
+            text="📡 ドローンに接続",
+            command=self.connect_drones,
+            state="disabled",
+        )
+        self.connect_btn.pack(fill="x", pady=(0, 5))
 
         self.start_btn = ttk.Button(
             action_frame,
@@ -282,9 +287,8 @@ class TelloApp:
         )
         self.stop_btn.pack(fill="x", pady=(5, 0))
 
-    def _create_right_panel(self, parent):
-        """右側パネル（ステータスバー、タイムライン、ログ）を作成"""
-        # ステータスバー
+    def _create_status_bar(self, parent):
+        """ステータスバーを作成"""
         status_bar = ttk.Frame(parent, padding=(5, 5))
         status_bar.grid(row=0, column=1, sticky="ew", pady=(0, 5))
 
@@ -293,7 +297,8 @@ class TelloApp:
         )
         ttk.Label(status_bar, textvariable=self.show_status).pack(side="left", padx=5)
 
-        # ログペイン
+    def _create_log_panels(self, parent):
+        """タイムラインと通信ログパネルを作成"""
         right_frame = ttk.Frame(parent)
         right_frame.grid(row=1, column=1, sticky="nsew")
         right_frame.grid_rowconfigure(0, weight=1)
@@ -302,15 +307,10 @@ class TelloApp:
         log_pane = ttk.PanedWindow(right_frame, orient="horizontal")
         log_pane.pack(fill="both", expand=True)
 
-        # タイムラインフレーム
-        self._create_timeline_frame(log_pane)
+        # タイムラインパネル
+        timeline_frame = ttk.Frame(log_pane)
+        log_pane.add(timeline_frame, weight=1)
 
-        # 通信ログフレーム
-        self._create_log_frame(log_pane)
-
-    def _create_timeline_frame(self, parent):
-        """タイムラインフレームを作成"""
-        timeline_frame = ttk.Frame(parent, width=400)
         ttk.Label(timeline_frame, text="タイムライン", style="Header.TLabel").pack(
             anchor="w", padx=5
         )
@@ -324,20 +324,10 @@ class TelloApp:
         )
         self.schedule_text.pack(expand=True, fill="both", padx=5, pady=(0, 5))
 
-        # タグ設定
-        self.schedule_text.tag_config("INFO", foreground="black")
-        self.schedule_text.tag_config("WAIT", foreground="blue")
-        self.schedule_text.tag_config("WARNING", foreground=COLOR_ERROR)
-        self.schedule_text.tag_config(
-            "HEADER", foreground=COLOR_ACCENT, font=self.font_header
-        )
-        self.schedule_text.tag_config("HIGHLIGHT", background=COLOR_HIGHLIGHT)
+        # 通信ログパネル
+        log_frame = ttk.Frame(log_pane)
+        log_pane.add(log_frame, weight=1)
 
-        parent.add(timeline_frame, weight=1)
-
-    def _create_log_frame(self, parent):
-        """通信ログフレームを作成"""
-        log_frame = ttk.Frame(parent, width=200)
         ttk.Label(log_frame, text="通信ログ", style="Header.TLabel").pack(
             anchor="w", padx=5
         )
@@ -352,24 +342,47 @@ class TelloApp:
         self.log_text.pack(expand=True, fill="both", padx=5, pady=(0, 5))
 
         # タグ設定
-        self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("SUCCESS", foreground=COLOR_SUCCESS)
-        self.log_text.tag_config("WARNING", foreground=COLOR_WARNING)
-        self.log_text.tag_config("ERROR", foreground=COLOR_ERROR)
+        self._configure_text_tags()
 
-        parent.add(log_frame, weight=1)
+    def _configure_text_tags(self):
+        """テキストウィジェットのタグを設定"""
+        # ログテキストのタグ
+        self.log_text.tag_config(LOG_LEVEL_INFO, foreground="black")
+        self.log_text.tag_config(LOG_LEVEL_SUCCESS, foreground=COLOR_SUCCESS)
+        self.log_text.tag_config(LOG_LEVEL_WARNING, foreground=COLOR_WARNING)
+        self.log_text.tag_config(LOG_LEVEL_ERROR, foreground=COLOR_ERROR)
 
-    # ========================================================================
-    # ドローン設定管理
-    # ========================================================================
+        # スケジュールテキストのタグ
+        self.schedule_text.tag_config(
+            EVENT_TYPE_TAKEOFF,
+            foreground=COLOR_SUCCESS,
+            font=(self.font_monospace[0], self.font_monospace[1], "bold"),
+        )
+        self.schedule_text.tag_config(EVENT_TYPE_INFO, foreground="black")
+        self.schedule_text.tag_config(EVENT_TYPE_WAIT, foreground="blue")
+        self.schedule_text.tag_config(EVENT_TYPE_WARNING, foreground=COLOR_ERROR)
+        self.schedule_text.tag_config(
+            "HEADER", foreground=COLOR_PRIMARY, font=self.font_header
+        )
+        self.schedule_text.tag_config("HIGHLIGHT", background=COLOR_HIGHLIGHT)
+        self.schedule_text.tag_config(
+            EVENT_TYPE_LAND,
+            foreground=COLOR_DANGER,
+            font=(self.font_monospace[0], self.font_monospace[1], "bold"),
+        )
 
     def add_drone_entry(self, name=None, ip=""):
-        """ドローンの設定エントリを追加"""
+        """
+        ドローンエントリーを追加
+
+        Args:
+            name: ドローン名（デフォルト: Tello_A, Tello_B, ...）
+            ip: IPアドレス
+        """
         drone_count = len(self.drone_entry_widgets)
         if name is None:
-            name = f"Tello_{chr(65 + drone_count)}"
+            name = f"{DEFAULT_DRONE_PREFIX}{chr(65 + drone_count)}"
 
-        # ウィジェットの作成
         widget_dict = {}
         row_frame = ttk.Frame(self.ip_entry_frame)
         row_frame.pack(fill="x", pady=2)
@@ -381,117 +394,103 @@ class TelloApp:
         entry.pack(side="left", expand=True, fill="x")
         entry.insert(0, ip)
 
-        widget_dict["name"] = name
-        widget_dict["frame"] = row_frame
-        widget_dict["ip_widget"] = entry
+        widget_dict.update({"name": name, "frame": row_frame, "ip_widget": entry})
         self.drone_entry_widgets.append(widget_dict)
 
     def remove_drone_entry(self):
-        """最後のドローン設定エントリを削除"""
+        """最後のドローンエントリーを削除"""
         if not self.drone_entry_widgets:
             return
-
         widgets_to_remove = self.drone_entry_widgets.pop()
         widgets_to_remove["frame"].destroy()
 
     def load_config(self):
         """設定ファイルからドローン設定を読み込む"""
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(CONFIG_FILENAME, "r") as f:
                 config_data = json.load(f)
 
-            # 既存のエントリをクリア
+            # 既存のエントリーをクリア
             while self.drone_entry_widgets:
                 self.remove_drone_entry()
 
-            # 設定からエントリを追加
+            # 設定からエントリーを追加
             for name, ip in config_data.items():
                 self.add_drone_entry(name=name, ip=ip)
 
             self.log(
                 {
-                    "level": "INFO",
-                    "message": f"{CONFIG_FILE} から設定を読み込みました。",
+                    "level": LOG_LEVEL_INFO,
+                    "message": f"{CONFIG_FILENAME} から設定を読み込みました。",
                 }
             )
-
         except FileNotFoundError:
             self.log(
                 {
-                    "level": "WARNING",
+                    "level": LOG_LEVEL_WARNING,
                     "message": "設定ファイルが見つかりません。ドローンを１台以上IPアドレスを入力し、保存してください。",
                 }
             )
             if not self.drone_entry_widgets:
                 self.add_drone_entry()
-
         except Exception as e:
-            self.log({"level": "ERROR", "message": f"設定の読み込みエラー: {e}"})
+            self.log(
+                {"level": LOG_LEVEL_ERROR, "message": f"設定の読み込みエラー: {e}"}
+            )
 
     def save_config(self):
-        """ドローン設定をファイルに保存"""
+        """ドローン設定を設定ファイルに保存"""
         config_data = {
             widgets["name"]: widgets["ip_widget"].get()
             for widgets in self.drone_entry_widgets
         }
-
         try:
-            with open(CONFIG_FILE, "w") as f:
+            with open(CONFIG_FILENAME, "w") as f:
                 json.dump(config_data, f, indent=4)
 
             self.log(
-                {"level": "INFO", "message": f"{CONFIG_FILE} に設定を保存しました。"}
+                {
+                    "level": LOG_LEVEL_INFO,
+                    "message": f"{CONFIG_FILENAME} に設定を保存しました。",
+                }
             )
             messagebox.showinfo("成功", "IPアドレスを保存しました。")
-
         except Exception as e:
             messagebox.showerror("エラー", f"設定の保存に失敗しました: {e}")
-
-    # ========================================================================
-    # ファイル選択とプロジェクト解析
-    # ========================================================================
 
     def select_file(self):
         """Scratchプロジェクトファイルを選択"""
         path = filedialog.askopenfilename(
             title="Scratch 3 プロジェクトファイルを選択",
-            filetypes=[("Scratch プロジェクト", "*.sb3")],
+            filetypes=SUPPORTED_PROJECT_FILES,
         )
 
         if path:
             self.sb3_path.set(path)
             self.sb3_path_label.configure(text=path.split("/")[-1])
-            self.parse_btn["state"] = "normal"
-            self.log({"level": "INFO", "message": f"選択されたファイル: {path}"})
-            self.show_status.set(f"ファイル選択済み: {path.split('/')[-1]}")
+            self._reset_ui_to_file_selected_state()
+            self.log(
+                {"level": LOG_LEVEL_INFO, "message": f"選択されたファイル: {path}"}
+            )
 
     def select_audio_file(self):
-        """音楽ファイルを選択（クイック選択）"""
+        """音楽ファイルをクイック選択（単一ファイル）"""
         path = filedialog.askopenfilename(
-            title="音楽ファイルを選択",
-            filetypes=[
-                ("音楽ファイル", "*.mp3;*.wav;*.ogg;*.flac"),
-                ("MP3ファイル", "*.mp3"),
-                ("WAVファイル", "*.wav"),
-                ("OGGファイル", "*.ogg"),
-                ("FLACファイル", "*.flac"),
-                ("すべてのファイル", "*.*"),
-            ],
+            title="音楽ファイルを選択", filetypes=SUPPORTED_AUDIO_FILES
         )
 
         if path:
             self.audio_path.set(path)
-            filename = path.split("/")[-1]
-
-            # メドレーリストをクリアして単一ファイルに設定
-            self.music_player.set_music_list([])
-            self.music_player.set_music(path)
-
-            # UI更新
-            self.audio_info_label.configure(
-                text=f"単一ファイル: {filename}", foreground="black"
+            self.music_list = []  # メドレーリストをクリア
+            self.is_medley_mode = False
+            filename = path.split("/")[-1].split("\\")[-1]
+            self.audio_path_label.configure(text=f"単一ファイル: {filename}")
+            self.log(
+                {
+                    "level": LOG_LEVEL_INFO,
+                    "message": f"選択された音楽ファイル: {filename}",
+                }
             )
-            self.log({"level": "INFO", "message": f"音楽ファイルを選択: {filename}"})
 
     def download_from_youtube(self):
         """YouTube URLから音源を取得"""
@@ -620,86 +619,57 @@ class TelloApp:
         """音楽管理ウィンドウを開く"""
         from gui.music_manager_window import MusicManagerWindow
 
-        # 現在の音楽リストを取得
-        current_list = self.music_player.get_music_list()
-
-        # 音楽管理ウィンドウを開く
         MusicManagerWindow(
-            self.master, self.music_player, current_list, self._on_music_list_saved
+            self.master, self.music_player, self.music_list, self._on_music_list_saved
         )
 
+    def _on_music_list_saved(self, music_list: list, interval: float):
+        """
+        音楽管理ウィンドウから音楽リストが保存された時の処理
+
+        Args:
+            music_list: 保存された音楽ファイルリスト
+            interval: 曲間インターバル（秒）
+        """
+        self.music_list = music_list
+
+        if music_list:
+            self.is_medley_mode = True
+            self.audio_path.set("")  # 単一ファイルパスをクリア
+            interval_text = f" (間隔: {interval}秒)" if interval > 0 else ""
+            self.audio_path_label.configure(
+                text=f"メドレー: {len(music_list)}曲{interval_text}"
+            )
+            self.log(
+                {
+                    "level": LOG_LEVEL_INFO,
+                    "message": f"メドレーを設定しました（{len(music_list)}曲、インターバル: {interval}秒）",
+                }
+            )
+        else:
+            self.is_medley_mode = False
+            self.audio_path.set("")
+            self.audio_path_label.configure(text="音楽ファイルが選択されていません")
+            self.log({"level": LOG_LEVEL_INFO, "message": "音楽設定をクリアしました"})
+
     def open_timeline_viewer(self):
-        """タイムラインビューアーを開く"""
-        # 既に開いている場合は前面に表示
-        if self.timeline_window is not None:
-            try:
-                self.timeline_window.window.lift()
-                self.timeline_window.window.focus_force()
-                self.log(
-                    {
-                        "level": "INFO",
-                        "message": "タイムラインビューアーを前面に表示しました",
-                    }
-                )
-                return
-            except:
-                # ウィンドウが閉じられている場合
-                self.timeline_window = None
+        """タイムラインビューアーウィンドウを開く"""
+        if not self.schedule:
+            messagebox.showwarning(
+                "警告",
+                "タイムラインが生成されていません。\n先にScratchファイルを解析してください。",
+            )
+            return
 
         from gui.timeline_viewer_window import TimelineViewerWindow
 
-        # 音楽リストを取得
-        music_list = self.music_player.get_music_list()
-
-        # 単一ファイルの場合もリスト化
-        if not music_list and self.audio_path.get():
-            music_list = [self.audio_path.get()]
-
-        # インターバルを取得
-        interval = self.music_player.get_interval()
-
-        # タイムラインビューアーを開く
-        self.timeline_window = TimelineViewerWindow(
-            self.master, music_list, self.schedule, self.total_time, interval
+        TimelineViewerWindow(
+            self.master,
+            self.schedule,
+            self.total_time,
+            self.music_list,
+            self.music_player,
         )
-
-        # ウィンドウが閉じられた時にNoneをセット
-        self.timeline_window.window.protocol(
-            "WM_DELETE_WINDOW", self._on_timeline_window_close
-        )
-
-        self.log({"level": "INFO", "message": "タイムラインビューアーを開きました"})
-
-    def _on_timeline_window_close(self):
-        """タイムラインウィンドウが閉じられた時のコールバック"""
-        if self.timeline_window:
-            self.timeline_window.window.destroy()
-            self.timeline_window = None
-
-    def _on_music_list_saved(self, music_list, interval=0.0):
-        """音楽リストが保存された時のコールバック"""
-        # 音楽リストを設定
-        self.music_player.set_music_list(music_list)
-
-        # インターバルを設定
-        self.music_player.set_interval(interval)
-
-        # UI更新
-        if music_list:
-            interval_text = f" (間隔: {interval}秒)" if interval > 0 else ""
-            self.audio_info_label.configure(
-                text=f"メドレー: {len(music_list)}曲{interval_text}",
-                foreground=COLOR_SUCCESS,
-            )
-            log_msg = f"メドレーを設定: {len(music_list)}曲"
-            if interval > 0:
-                log_msg += f" (曲間インターバル: {interval}秒)"
-            self.log({"level": "INFO", "message": log_msg})
-        else:
-            self.audio_info_label.configure(
-                text="設定されていません", foreground="#666"
-            )
-            self.log({"level": "INFO", "message": "音楽設定をクリアしました"})
 
     def save_project(self):
         """プロジェクトを保存"""
@@ -900,98 +870,114 @@ class TelloApp:
         if not path:
             return
 
-        # テキストエリアをクリア
-        for widget in [self.schedule_text, self.log_text]:
-            widget.config(state="normal")
-            widget.delete(1.0, tk.END)
-            widget.config(state="disabled")
+        # ログをクリア
+        self.log_text.config(state="normal")
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state="disabled")
 
-        # プロジェクトを解析
+        self.log(
+            {"level": LOG_LEVEL_INFO, "message": "Scratchファイルの解析を開始します..."}
+        )
+
+        # 解析実行
         parser = ScratchProjectParser(path, self.log_queue)
         self.schedule, self.total_time = parser.parse_to_schedule()
 
         # タイムラインを表示
-        self._display_timeline(parser)
+        self._display_timeline()
 
-    def _display_timeline(self, parser):
-        """タイムラインを表示"""
+    def _display_timeline(self):
+        """解析結果をタイムラインに表示"""
         self.schedule_text.config(state="normal")
         self.schedule_text.delete(1.0, tk.END)
         self.time_to_line_map = {}
 
-        if self.schedule or parser.has_any_valid_action:
+        if self.schedule:
             # ヘッダー
             self.schedule_text.insert(
                 tk.END,
                 f"--- 生成されたタイムライン (予想総時間: {self.total_time:.2f}秒) ---\n\n",
                 "HEADER",
             )
+
             current_line = 3
 
-            # イベントを時刻ごとにグループ化
-            grouped_events = {}
-            for event in self.schedule:
-                if event["time"] not in grouped_events:
-                    grouped_events[event["time"]] = []
-                grouped_events[event["time"]].append(event)
+            # 時間ごとにイベントをグループ化
+            grouped_events = {
+                t: [e for e in self.schedule if e["time"] == t]
+                for t in sorted(list(set(e["time"] for e in self.schedule)))
+            }
 
             # イベントを表示
-            for time, events in sorted(grouped_events.items()):
+            for time, events in grouped_events.items():
                 start_line = current_line
 
                 for event in events:
-                    evt_type = event.get("type", "COMMAND")
-
-                    if evt_type == "COMMAND":
-                        log_msg = f"{time: >6.2f}s | {event.get('target', 'N/A'): <8} | 実行: {event.get('command', '')}\n"
-                        self.schedule_text.insert(tk.END, log_msg, "INFO")
-
-                    elif evt_type == "WAIT":
-                        log_msg = f"{time: >6.2f}s | {event.get('target', 'N/A'): <8} | 待機: {event.get('text', '')}\n"
-                        self.schedule_text.insert(tk.END, log_msg, "WAIT")
-
-                    elif evt_type == "WARNING":
-                        log_msg = f"{time: >6.2f}s | {event.get('text', '')}\n"
-                        self.schedule_text.insert(tk.END, log_msg, "WARNING")
-
+                    log_msg = self._format_event_message(time, event)
+                    evt_type = event.get("type", EVENT_TYPE_INFO)
+                    self.schedule_text.insert(tk.END, log_msg, evt_type)
                     current_line += 1
 
-                end_line = current_line - 1
-                self.time_to_line_map[time] = {"start": start_line, "end": end_line}
+                self.time_to_line_map[time] = {
+                    "start": start_line,
+                    "end": current_line - 1,
+                }
 
             self.log(
                 {
-                    "level": "INFO",
+                    "level": LOG_LEVEL_SUCCESS,
                     "message": "解析に成功しました。ドローンに接続してください。",
                 }
             )
-            self.timeline_viewer_btn["state"] = "normal"
             self.connect_btn["state"] = "normal"
-            self.show_status.set(f"解析完了。ドローンに接続してください。")
-
+            self.timeline_viewer_btn["state"] = (
+                "normal"  # タイムラインビューアーボタンを有効化
+            )
+            self.show_status.set("解析完了。ドローンに接続してください。")
         else:
             self.schedule_text.insert(
                 tk.END,
                 "ファイルから有効なスケジュールを生成できませんでした。\n",
-                "ERROR",
+                LOG_LEVEL_ERROR,
             )
             self.schedule_text.insert(
                 tk.END,
                 "ヒント: スプライトに「緑の旗が押されたとき」ブロックがありますか？\n",
-                "INFO",
+                LOG_LEVEL_INFO,
             )
             self.show_status.set("解析失敗")
 
         self.schedule_text.config(state="disabled")
 
-    # ========================================================================
-    # ドローン接続
-    # ========================================================================
+    def _format_event_message(self, time, event):
+        """
+        イベントメッセージをフォーマット
+
+        Args:
+            time: イベント時刻
+            event: イベント辞書
+
+        Returns:
+            フォーマットされたメッセージ文字列
+        """
+        evt_type = event.get("type")
+        target = event.get("target", "N/A")
+
+        if evt_type == EVENT_TYPE_TAKEOFF:
+            return f"{time: >6.2f}s | {target: <8} | {event.get('text', '')}\n"
+        elif evt_type == EVENT_TYPE_COMMAND:
+            return f"{time: >6.2f}s | {target: <8} | 実行: {event.get('command', '')}\n"
+        elif evt_type == EVENT_TYPE_WAIT:
+            return f"{time: >6.2f}s | {target: <8} | 待機: {event.get('text', '')}\n"
+        elif evt_type == EVENT_TYPE_WARNING:
+            return f"{time: >6.2f}s | {event.get('text', '')}\n"
+        elif evt_type == EVENT_TYPE_LAND:
+            return f"{time: >6.2f}s | {target: <8} | {event.get('text', '')}\n"
+        else:
+            return f"{time: >6.2f}s | {event.get('text', '')}\n"
 
     def connect_drones(self):
         """ドローンに接続"""
-        from show_runner import ShowRunner
-
         self.connect_btn["state"] = "disabled"
         self.show_status.set("ドローンに接続中...")
 
@@ -1002,13 +988,11 @@ class TelloApp:
 
         if not all(c["pc_ip"] for c in drones_config):
             messagebox.showerror(
-                "エラー", "接続前に、すべてのIPアドレスを入力してください。"
+                "エラー", "開始前に、すべてのIPアドレスを入力してください。"
             )
             self.connect_btn["state"] = "normal"
-            self.show_status.set("解析完了。ドローンに接続してください。")
             return
 
-        # ShowRunnerを使って接続
         show_runner = ShowRunner(
             drones_config,
             self.schedule,
@@ -1016,73 +1000,94 @@ class TelloApp:
             self.log_queue,
             self.total_time,
         )
-        threading.Thread(target=show_runner.connect).start()
-
-    # ========================================================================
-    # ショー実行制御
-    # ========================================================================
+        threading.Thread(target=show_runner.connect, daemon=True).start()
 
     def start_show(self):
-        """ドローンショーを開始"""
-        from show_runner import ShowRunner
-
-        if not self.controllers:
-            messagebox.showerror(
-                "エラー", "ドローンに接続してからショーを開始してください。"
-            )
-            return
-
-        # UIの状態を更新
-        self.start_btn["state"] = "disabled"
-        self.parse_btn["state"] = "disabled"
-        self.connect_btn["state"] = "disabled"
-        self.stop_btn["state"] = "normal"
+        """ショーを開始"""
+        self._set_ui_for_show_running(True)
         self.stop_event.clear()
         self.show_status.set("ショー実行中...")
 
-        # 音楽を再生（音楽リストまたは単一ファイルが設定されている場合）
-        music_list = self.music_player.get_music_list()
-        if music_list or self.audio_path.get():
-            # ドローンのtakeoffコマンドの実行時間（約3秒）を考慮して遅延
-            self.music_player.play(delay=3.0)
+        # 音楽再生（3秒遅延）
+        if self.is_medley_mode and self.music_list:
+            # メドレーモード
+            self.music_player.set_music_list(self.music_list)
+            self.music_player.play_medley(delay_seconds=3.0)
+        elif self.audio_path.get():
+            # 単一ファイルモード
+            self.music_player.play(self.audio_path.get(), delay_seconds=3.0)
 
-        # ShowRunnerを使ってショーを実行（既存のコントローラーを使用）
         show_runner = ShowRunner(
-            None,  # drones_configは不要（既にcontrollersがある）
+            None,
             self.schedule,
             self.stop_event,
             self.log_queue,
             self.total_time,
-            self.controllers,  # 接続済みのコントローラーを渡す
+            self.controllers,
+            self.audio_path.get(),
         )
-        self.show_thread = threading.Thread(target=show_runner.run_show)
+
+        self.show_thread = threading.Thread(target=show_runner.run_show, daemon=True)
         self.show_thread.start()
 
     def emergency_stop(self):
         """緊急停止"""
         self.log(
             {
-                "level": "ERROR",
+                "level": LOG_LEVEL_ERROR,
                 "message": "\n!!! ユーザーによる緊急停止が要求されました !!!",
             }
         )
-        self.stop_event.set()
 
         # 音楽を停止
         self.music_player.stop()
 
-        # UIの状態を更新
+        self.stop_event.set()
+        self.show_status.set("緊急停止 - 着陸中...")
         self.stop_btn["state"] = "disabled"
-        self.start_btn["state"] = "normal"
-        self.parse_btn["state"] = "normal"
-        self.show_status.set("緊急停止 - 着陸中")
 
-    # ========================================================================
-    # ログとUI更新
-    # ========================================================================
+    def _reset_ui_to_parsed_state(self):
+        """UIを解析完了状態にリセット"""
+        self.controllers = {}
+        self.stop_event.clear()
+        self.stop_btn["state"] = "disabled"
+        self.start_btn["state"] = "disabled"
+        self.connect_btn["state"] = "normal"
+        self.parse_btn["state"] = "normal"
+        self.connect_btn.config(text="📡 ドローンに接続")
+        self.show_status.set("準備完了。ドローンに接続してください。")
+        self.update_timeline_highlight(None)
+
+    def _set_ui_for_show_running(self, is_running):
+        """
+        ショー実行中のUI状態を設定
+
+        Args:
+            is_running: ショーが実行中かどうか
+        """
+        state = "disabled" if is_running else "normal"
+        self.start_btn["state"] = state
+        self.parse_btn["state"] = state
+        self.connect_btn["state"] = state
+        self.stop_btn["state"] = "normal" if is_running else "disabled"
+
+    def _reset_ui_to_file_selected_state(self):
+        """UIをファイル選択状態にリセット"""
+        self.parse_btn["state"] = "normal"
+        self.connect_btn["state"] = "disabled"
+        self.start_btn["state"] = "disabled"
+        self.stop_btn["state"] = "disabled"
+        self.timeline_viewer_btn["state"] = "disabled"
+        self.connect_btn.config(text="📡 ドローンに接続")
+        self.show_status.set("ファイル選択済み。解析してください。")
 
     def log(self, log_item):
-        """ログをキューに追加"""
+        """
+        ログメッセージをキューに追加
+
+        Args:
+            log_item: ログアイテム（辞書またはメッセージ文字列）
+        """
         self.log_queue.put(log_item)
 
     def process_log_queue(self):
@@ -1091,44 +1096,57 @@ class TelloApp:
             while not self.log_queue.empty():
                 log_item = self.log_queue.get_nowait()
 
-                # 特殊なコマンド
+                # 特殊なメッセージタイプの処理
                 if isinstance(log_item, dict) and "type" in log_item:
-                    if log_item["type"] == "highlight":
+                    msg_type = log_item["type"]
+
+                    if msg_type == "highlight":
                         self.update_timeline_highlight(log_item.get("time"))
                         continue
-                    elif log_item["type"] == "clear_highlight":
+                    elif msg_type == "clear_highlight":
                         self.update_timeline_highlight(None)
                         continue
-                    elif log_item["type"] == "show_complete":
-                        # ショー完了時の処理
-                        self.music_player.stop()
+                    elif msg_type == "connection_success":
+                        self.controllers = log_item["controllers"]
                         self.start_btn["state"] = "normal"
-                        self.parse_btn["state"] = "normal"
-                        self.stop_btn["state"] = "disabled"
-                        self.show_status.set("ショー完了")
+                        self.connect_btn.config(text="✓ 接続済み")
+                        self.show_status.set("接続完了。ショーを開始できます。")
+                        continue
+                    elif msg_type == "connection_fail":
+                        self.connect_btn["state"] = "normal"
+                        self.show_status.set("接続に失敗しました。再試行してください。")
+                        continue
+                    elif msg_type == "show_finished":
+                        # 音楽を停止
+                        self.music_player.stop()
+                        self._reset_ui_to_parsed_state()
                         continue
 
-                # 通常のログ
+                # 通常のログメッセージ
                 if isinstance(log_item, dict):
-                    level = log_item.get("level", "INFO")
+                    level = log_item.get("level", LOG_LEVEL_INFO)
                     message = log_item.get("message", "")
                 else:
-                    level = "INFO"
+                    level = LOG_LEVEL_INFO
                     message = str(log_item)
 
                 self.log_text.config(state="normal")
                 self.log_text.insert(tk.END, message + "\n", level)
                 self.log_text.see(tk.END)
                 self.log_text.config(state="disabled")
-
         finally:
-            self.master.after(100, self.process_log_queue)
+            self.master.after(LOG_QUEUE_UPDATE_INTERVAL, self.process_log_queue)
 
     def update_timeline_highlight(self, current_time):
-        """タイムラインのハイライトを更新"""
+        """
+        タイムラインのハイライトを更新
+
+        Args:
+            current_time: 現在の時刻（Noneの場合はハイライトをクリア）
+        """
         self.schedule_text.config(state="normal")
 
-        # 前回のハイライトをクリア
+        # 前のハイライトを削除
         if self.last_highlighted_lines:
             self.schedule_text.tag_remove(
                 "HIGHLIGHT",
@@ -1137,7 +1155,7 @@ class TelloApp:
             )
             self.last_highlighted_lines = None
 
-        # 新しい行をハイライト
+        # 新しいハイライトを追加
         if current_time is not None and current_time in self.time_to_line_map:
             line_info = self.time_to_line_map[current_time]
             self.schedule_text.tag_add(
@@ -1149,7 +1167,7 @@ class TelloApp:
         self.schedule_text.config(state="disabled")
 
     def on_closing(self):
-        """ウィンドウが閉じられる時の処理"""
+        """ウィンドウを閉じる際の処理"""
         if self.show_thread and self.show_thread.is_alive():
             if messagebox.askyesno(
                 "終了確認", "ショーが実行中です。停止して終了しますか？"
@@ -1160,7 +1178,7 @@ class TelloApp:
                     self.project_manager.cleanup_temp_files(self.current_project_path)
                 self.master.destroy()
         else:
-            # 音楽を停止
+            # 音楽プレイヤーを停止
             self.music_player.stop()
             # 一時ファイルをクリーンアップ
             if self.current_project_path:
