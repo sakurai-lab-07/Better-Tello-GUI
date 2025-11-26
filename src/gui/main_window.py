@@ -13,6 +13,8 @@ import threading
 from scratch_parser import ScratchProjectParser
 from show_runner import ShowRunner
 from music_player import MusicPlayer
+from project_manager import ProjectManager
+from youtube_downloader import YouTubeDownloader
 from config import (
     FONT_NORMAL,
     FONT_BOLD_LARGE,
@@ -91,6 +93,12 @@ class TelloApp:
 
         # 音楽プレイヤー初期化
         self.music_player = MusicPlayer(log_callback=self.log)
+
+        # プロジェクトマネージャー初期化
+        self.project_manager = ProjectManager(log_queue=self.log_queue)
+
+        # YouTubeダウンローダー初期化
+        self.youtube_downloader = YouTubeDownloader(log_queue=self.log_queue)
 
         self._create_widgets()
         self.load_config()
@@ -232,7 +240,23 @@ class TelloApp:
             command=self.open_timeline_viewer,
             state="disabled",
         )
-        self.timeline_viewer_btn.pack(fill="x")
+        self.timeline_viewer_btn.pack(fill="x", pady=(0, 10))
+
+        # プロジェクト管理ボタン
+        project_btn_frame = ttk.Frame(file_frame)
+        project_btn_frame.pack(fill="x")
+
+        ttk.Button(
+            project_btn_frame,
+            text="💾 プロジェクト保存",
+            command=self.save_project,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 3))
+
+        ttk.Button(
+            project_btn_frame,
+            text="📁 プロジェクト読込",
+            command=self.load_project,
+        ).pack(side="left", fill="x", expand=True, padx=(3, 0))
 
     def _create_audio_selection_section(self, parent):
         """④ 音源ファイル選択セクションを作成"""
@@ -610,7 +634,7 @@ class TelloApp:
             self.audio_path.set(youtube_url)
 
             # UI更新
-            self.audio_info_label.configure(
+            self.audio_path_label.configure(
                 text=f"YouTube: {title[:40]}...", foreground=COLOR_SUCCESS
             )
             self.log({"level": "INFO", "message": f"YouTube音源を設定: {title}"})
@@ -786,16 +810,33 @@ class TelloApp:
         music_interval = project_data["music_interval"]
 
         if music_paths:
+            # 音楽リストを内部変数に保存
+            self.music_list = music_paths
+
+            # 音楽プレイヤーに設定
             self.music_player.set_music_list(music_paths)
             self.music_player.set_interval(music_interval)
 
+            # メドレーモードに設定
+            self.is_medley_mode = len(music_paths) > 1
+
             interval_text = f" (間隔: {music_interval}秒)" if music_interval > 0 else ""
-            self.audio_info_label.configure(
+            self.audio_path_label.configure(
                 text=f"メドレー: {len(music_paths)}曲{interval_text}",
                 foreground=COLOR_SUCCESS,
             )
+
+            # ログ出力
+            self.log(
+                {
+                    "level": "INFO",
+                    "message": f"音楽を復元しました: {len(music_paths)}曲 (間隔: {music_interval}秒)",
+                }
+            )
         else:
-            self.audio_info_label.configure(
+            self.music_list = []
+            self.is_medley_mode = False
+            self.audio_path_label.configure(
                 text="設定されていません", foreground="#666"
             )
 

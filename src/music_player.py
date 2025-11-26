@@ -7,6 +7,10 @@ pygameを使用して音楽ファイルの再生、停止、音量制御を行�
 
 import threading
 import time
+import os
+import tempfile
+import hashlib
+from pathlib import Path
 from typing import Optional, List
 
 try:
@@ -40,6 +44,10 @@ class MusicPlayer:
         self.current_index = 0  # 現在再生中の曲のインデックス
         self.current_music = None  # 単一ファイル再生用
         self.interval_seconds = 0.0  # 曲間インターバル（秒）
+
+        # YouTube音源のキャッシュディレクトリ
+        self.temp_dir = Path(tempfile.gettempdir()) / "tello_youtube_cache"
+        self.temp_dir.mkdir(exist_ok=True)
 
         try:
             import pygame
@@ -82,7 +90,7 @@ class MusicPlayer:
         遅延後に音楽を再生する内部メソッド
 
         Args:
-            audio_path: 音楽ファイルのパス
+            audio_path: 音楽ファイルのパスまたはYouTube URL
             delay_seconds: 遅延時間（秒）
         """
         try:
@@ -93,16 +101,35 @@ class MusicPlayer:
             if self.stop_requested:
                 return
 
+            # YouTube URLの場合はキャッシュファイルを取得
+            actual_path = audio_path
+            if self._is_youtube_url(audio_path):
+                if self.log_callback:
+                    self.log_callback(
+                        {
+                            "level": "INFO",
+                            "message": "YouTube音源を取得中...",
+                        }
+                    )
+                actual_path = self._download_youtube_audio(audio_path)
+                if not actual_path:
+                    raise Exception("YouTube音源の取得に失敗しました")
+
             # 音楽ファイルを読み込んで再生
-            self.pygame.mixer.music.load(audio_path)
+            self.pygame.mixer.music.load(actual_path)
             self.pygame.mixer.music.play()
             self.is_playing = True
 
             if self.log_callback:
+                display_name = (
+                    os.path.basename(actual_path)
+                    if not self._is_youtube_url(audio_path)
+                    else "YouTube"
+                )
                 self.log_callback(
                     {
                         "level": "INFO",
-                        "message": f"♪ 音楽再生開始: {audio_path.split('/')[-1]}",
+                        "message": f"♪ 音楽再生開始: {display_name}",
                     }
                 )
 
@@ -302,3 +329,92 @@ class MusicPlayer:
                 self.log_callback(
                     {"level": "ERROR", "message": f"メドレー再生エラー: {e}"}
                 )
+
+    def _is_youtube_url(self, url: str) -> bool:
+        """
+        YouTube URLかどうかを判定
+
+        Args:
+            url: チェックするURL文字列
+
+        Returns:
+            bool: YouTube URLの場合True
+        """
+        if not url:
+            return False
+        return url.startswith(("http://", "https://")) and (
+            "youtube.com" in url or "youtu.be" in url
+        )
+
+    def _download_youtube_audio(self, url: str) -> Optional[str]:
+        """
+        YouTube URLから音声をダウンロードしてキャッシュ
+
+        Args:
+            url: YouTube URL
+
+        Returns:
+            str: ダウンロードしたファイルのパス、失敗時はNone
+        """
+        if not YT_DLP_AVAILABLE:
+            if self.log_callback:
+                self.log_callback(
+                    {
+                        "level": "ERROR",
+                        "message": "yt-dlpがインストールされていません",
+                    }
+                )
+            return None
+
+        try:
+            # URLのMD5ハッシュをファイル名として使用
+            url_hash = hashlib.md5(url.encode()).hexdigest()
+            cache_file = self.temp_dir / f"{url_hash}.mp3"
+
+            # キャッシュが存在すれば再利用
+            if cache_file.exists():
+                if self.log_callback:
+                    self.log_callback(
+                        {
+                            "level": "INFO",
+                            "message": "キャッシュから音源を読み込みました",
+                        }
+                    )
+                return str(cache_file)
+
+            # yt-dlpで音声をダウンロード
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "outtmpl": str(cache_file.with_suffix("")),
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+                "quiet": True,
+                "no_warnings": True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            if cache_file.exists():
+                if self.log_callback:
+                    self.log_callback(
+                        {
+                            "level": "INFO",
+                            "message": "YouTube音源をキャッシュしました",
+                        }
+                    )
+                return str(cache_file)
+            else:
+                raise Exception("ダウンロードしたファイルが見つかりません")
+
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(
+                    {"level": "ERROR", "message": f"YouTube音源の取得に失敗: {e}"}
+                )
+            return None

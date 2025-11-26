@@ -144,6 +144,10 @@ class TimelineViewerWindow:
         h_scrollbar.config(command=self.canvas.xview)
         v_scrollbar.config(command=self.canvas.yview)
 
+        # マウスホイールでのスクロールをバインド
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
+
         # ズーム制御フレーム
         zoom_frame = ttk.Frame(main_frame)
         zoom_frame.pack(fill="x", pady=(10, 0))
@@ -185,6 +189,10 @@ class TimelineViewerWindow:
         self.canvas.config(
             scrollregion=(0, 0, self.header_width + timeline_width, timeline_height)
         )
+
+        # 初回描画時は左端にスクロール
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
 
         current_y = self.timeline_padding
 
@@ -459,3 +467,13 @@ class TimelineViewerWindow:
         """ズームラベルを更新"""
         zoom_percent = int((self.pixels_per_second / 50) * 100)
         self.zoom_label.config(text=f"{zoom_percent}%")
+
+    def _on_mousewheel(self, event):
+        """マウスホイールで縦スクロール"""
+        # Windowsの場合: event.delta は 120 or -120
+        # 正の値で上スクロール、負の値で下スクロール
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_shift_mousewheel(self, event):
+        """Shift+マウスホイールで横スクロール"""
+        self.canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
