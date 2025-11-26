@@ -1,14 +1,10 @@
 """
 Tello Scratch ドローンショー・コントローラー
-
-Scratchプロジェクトから生成されたタイムラインに基づいて
-Telloドローンのショーを制御するアプリケーションです。
-
-使い方:
-    python main.py
+メインエントリーポイント
 """
 
 import sys
+import os
 import tkinter as tk
 
 from gui import TelloApp

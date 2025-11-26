@@ -190,8 +190,16 @@ class TelloApp:
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         ttk.Button(ip_frame, text="⚙️ 設定を保存", command=self.save_config).pack(
-            fill="x", pady=(10, 0)
+            fill="x", pady=(10, 5)
         )
+
+        self.connect_btn = ttk.Button(
+            ip_frame,
+            text="📡 ドローンに接続",
+            command=self.connect_drones,
+            state="disabled",
+        )
+        self.connect_btn.pack(fill="x", pady=(5, 0))
 
     def _create_project_selection_section(self, parent):
         """② プロジェクト選択 & 解析セクションを作成"""
@@ -484,6 +492,129 @@ class TelloApp:
                 }
             )
 
+    def download_from_youtube(self):
+        """YouTube URLから音源を取得"""
+        if not self.youtube_downloader.is_available():
+            messagebox.showerror(
+                "エラー",
+                "yt-dlpがインストールされていません。\n\n"
+                "以下のコマンドでインストールしてください:\n"
+                "pip install yt-dlp",
+            )
+            return
+
+        # URL入力ダイアログを作成
+        dialog = tk.Toplevel(self.master)
+        dialog.title("YouTube音源設定")
+        dialog.geometry("500x200")
+        dialog.transient(self.master)
+        dialog.grab_set()
+
+        # 中央に配置
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        # コンテンツフレーム
+        content_frame = ttk.Frame(dialog, padding="20")
+        content_frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            content_frame,
+            text="YouTube動画のURLを入力してください:",
+            font=self.font_normal,
+        ).pack(anchor="w", pady=(0, 5))
+
+        ttk.Label(
+            content_frame,
+            text="※再生時に音声データを一時ファイルとしてキャッシュします",
+            font=("Arial", 8),
+            foreground="gray",
+        ).pack(anchor="w", pady=(0, 10))
+
+        url_entry = ttk.Entry(content_frame, font=self.font_normal)
+        url_entry.pack(fill="x", pady=(0, 10))
+        url_entry.focus()
+
+        # ステータスラベル
+        status_label = ttk.Label(content_frame, text="", foreground="gray")
+        status_label.pack(fill="x", pady=(0, 10))
+
+        # ボタンフレーム
+        button_frame = ttk.Frame(content_frame)
+        button_frame.pack(fill="x")
+
+        result = {"youtube_url": None}
+
+        def on_add():
+            url = url_entry.get().strip()
+            if not url:
+                messagebox.showwarning("警告", "URLを入力してください。", parent=dialog)
+                return
+
+            if not self.youtube_downloader.is_youtube_url(url):
+                messagebox.showerror(
+                    "エラー", "有効なYouTube URLではありません。", parent=dialog
+                )
+                return
+
+            # URL検証中の表示
+            status_label.config(text="YouTube動画情報を確認中...")
+            dialog.update()
+
+            # 動画情報を取得
+            video_info = self.youtube_downloader.get_video_info(url)
+
+            if video_info:
+                result["youtube_url"] = url
+                result["title"] = video_info.get("title", "Unknown")
+                messagebox.showinfo(
+                    "成功",
+                    f"YouTube動画を追加しました。\n\nタイトル: {result['title']}",
+                    parent=dialog,
+                )
+                dialog.destroy()
+            else:
+                status_label.config(text="")
+                messagebox.showerror(
+                    "エラー",
+                    "動画情報の取得に失敗しました。\nURLを確認してください。",
+                    parent=dialog,
+                )
+
+        def on_cancel():
+            dialog.destroy()
+
+        ttk.Button(
+            button_frame, text="追加", command=on_add, style="Accent.TButton"
+        ).pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        ttk.Button(button_frame, text="キャンセル", command=on_cancel).pack(
+            side="left", fill="x", expand=True
+        )
+
+        # Enterキーで追加
+        url_entry.bind("<Return>", lambda e: on_add())
+
+        dialog.wait_window()
+
+        # URLが追加された場合、音楽を設定
+        if result["youtube_url"]:
+            youtube_url = result["youtube_url"]
+            title = result.get("title", "YouTube動画")
+
+            # メドレーリストをクリアして単一URLに設定
+            self.music_player.set_music_list([])
+            self.music_player.set_music(youtube_url)
+            self.audio_path.set(youtube_url)
+
+            # UI更新
+            self.audio_info_label.configure(
+                text=f"YouTube: {title[:40]}...", foreground=COLOR_SUCCESS
+            )
+            self.log({"level": "INFO", "message": f"YouTube音源を設定: {title}"})
+
     def open_music_manager(self):
         """音楽管理ウィンドウを開く"""
         from gui.music_manager_window import MusicManagerWindow
@@ -539,6 +670,199 @@ class TelloApp:
             self.music_list,
             self.music_player,
         )
+
+    def save_project(self):
+        """プロジェクトを保存"""
+        # スケジュールが解析されていない場合
+        if not self.schedule:
+            messagebox.showwarning(
+                "警告",
+                "プロジェクトを保存するには、まずタイムラインを解析してください。",
+            )
+            return
+
+        # ファイル名のデフォルトを設定
+        default_name = "project"
+        if self.sb3_path.get():
+            import os
+
+            sb3_name = os.path.basename(self.sb3_path.get())
+            default_name = os.path.splitext(sb3_name)[0]
+
+        # 保存先を選択
+        save_path = filedialog.asksaveasfilename(
+            title="プロジェクトを保存",
+            defaultextension=self.project_manager.PROJECT_EXTENSION,
+            initialfile=default_name,
+            filetypes=[
+                (
+                    "Telloプロジェクト",
+                    f"*{self.project_manager.PROJECT_EXTENSION}",
+                ),
+                ("すべてのファイル", "*.*"),
+            ],
+        )
+
+        if not save_path:
+            return
+
+        # ドローン設定を取得
+        drone_config = {
+            widgets["name"]: widgets["ip_widget"].get()
+            for widgets in self.drone_entry_widgets
+        }
+
+        # 音楽リストを取得
+        music_list = self.music_player.get_music_list()
+        if not music_list and self.audio_path.get():
+            # 単一ファイルの場合
+            music_list = [self.audio_path.get()]
+
+        # プロジェクトを保存
+        success = self.project_manager.save_project(
+            project_path=save_path,
+            sb3_path=self.sb3_path.get(),
+            schedule=self.schedule,
+            total_time=self.total_time,
+            time_to_line_map=self.time_to_line_map,
+            music_list=music_list,
+            music_interval=self.music_player.get_interval(),
+            drone_config=drone_config,
+        )
+
+        if success:
+            self.current_project_path = save_path
+            messagebox.showinfo("成功", f"プロジェクトを保存しました。\n{save_path}")
+        else:
+            messagebox.showerror("エラー", "プロジェクトの保存に失敗しました。")
+
+    def load_project(self):
+        """プロジェクトを読み込み"""
+        # ファイルを選択
+        load_path = filedialog.askopenfilename(
+            title="プロジェクトを読み込み",
+            filetypes=[
+                (
+                    "Telloプロジェクト",
+                    f"*{self.project_manager.PROJECT_EXTENSION}",
+                ),
+                ("すべてのファイル", "*.*"),
+            ],
+        )
+
+        if not load_path:
+            return
+
+        # プロジェクトを読み込み
+        project_data = self.project_manager.load_project(load_path)
+
+        if not project_data:
+            messagebox.showerror("エラー", "プロジェクトの読み込みに失敗しました。")
+            return
+
+        # データを復元
+        self.current_project_path = load_path
+
+        # .sb3ファイルを設定
+        if project_data["sb3_path"]:
+            self.sb3_path.set(project_data["sb3_path"])
+            import os
+
+            filename = os.path.basename(project_data["sb3_path"])
+            self.sb3_path_label.configure(text=filename)
+            self.parse_btn["state"] = "normal"
+
+        # スケジュールとタイムライン情報を復元
+        self.schedule = project_data["schedule"]
+        self.total_time = project_data["total_time"]
+        self.time_to_line_map = project_data["time_to_line_map"]
+
+        # タイムラインを表示
+        if self.schedule:
+            self._restore_timeline_display()
+
+        # 音楽設定を復元
+        music_paths = project_data["music_paths"]
+        music_interval = project_data["music_interval"]
+
+        if music_paths:
+            self.music_player.set_music_list(music_paths)
+            self.music_player.set_interval(music_interval)
+
+            interval_text = f" (間隔: {music_interval}秒)" if music_interval > 0 else ""
+            self.audio_info_label.configure(
+                text=f"メドレー: {len(music_paths)}曲{interval_text}",
+                foreground=COLOR_SUCCESS,
+            )
+        else:
+            self.audio_info_label.configure(
+                text="設定されていません", foreground="#666"
+            )
+
+        # ドローン設定を復元
+        drone_config = project_data["drone_config"]
+        if drone_config:
+            # 既存のエントリをクリア
+            while self.drone_entry_widgets:
+                self.remove_drone_entry()
+
+            # 設定からエントリを追加
+            for name, ip in drone_config.items():
+                self.add_drone_entry(name=name, ip=ip)
+
+        messagebox.showinfo("成功", f"プロジェクトを読み込みました。\n{load_path}")
+
+        self.log(
+            {"level": "INFO", "message": f"プロジェクトを読み込みました: {load_path}"}
+        )
+
+    def _restore_timeline_display(self):
+        """保存されたタイムラインを表示エリアに復元"""
+        self.schedule_text.config(state="normal")
+        self.schedule_text.delete(1.0, tk.END)
+
+        if not self.schedule:
+            self.schedule_text.config(state="disabled")
+            return
+
+        # イベントを時間ごとにグループ化
+        grouped_events = {}
+        for event in self.schedule:
+            if event["time"] not in grouped_events:
+                grouped_events[event["time"]] = []
+            grouped_events[event["time"]].append(event)
+
+        # タイムラインを構築
+        current_line = 1
+        for time, events in sorted(grouped_events.items()):
+            start_line = current_line
+
+            for event in events:
+                evt_type = event.get("type", "COMMAND")
+
+                if evt_type == "COMMAND":
+                    log_msg = f"{time: >6.2f}s | {event.get('target', 'N/A'): <8} | 実行: {event.get('command', '')}\n"
+                    self.schedule_text.insert(tk.END, log_msg, "INFO")
+
+                elif evt_type == "WAIT":
+                    log_msg = f"{time: >6.2f}s | {event.get('target', 'N/A'): <8} | 待機: {event.get('text', '')}\n"
+                    self.schedule_text.insert(tk.END, log_msg, "WAIT")
+
+                elif evt_type == "WARNING":
+                    log_msg = f"{time: >6.2f}s | {event.get('text', '')}\n"
+                    self.schedule_text.insert(tk.END, log_msg, "WARNING")
+
+                current_line += 1
+
+            end_line = current_line - 1
+            self.time_to_line_map[time] = {"start": start_line, "end": end_line}
+
+        self.schedule_text.config(state="disabled")
+
+        # ボタンの状態を更新
+        self.timeline_viewer_btn["state"] = "normal"
+        self.connect_btn["state"] = "normal"
+        self.show_status.set("タイムライン読み込み完了")
 
     def parse_scratch_project(self):
         """Scratchプロジェクトを解析してタイムラインを生成"""
@@ -849,8 +1173,14 @@ class TelloApp:
                 "終了確認", "ショーが実行中です。停止して終了しますか？"
             ):
                 self.emergency_stop()
+                # 一時ファイルをクリーンアップ
+                if self.current_project_path:
+                    self.project_manager.cleanup_temp_files(self.current_project_path)
                 self.master.destroy()
         else:
             # 音楽プレイヤーを停止
             self.music_player.stop()
+            # 一時ファイルをクリーンアップ
+            if self.current_project_path:
+                self.project_manager.cleanup_temp_files(self.current_project_path)
             self.master.destroy()

@@ -9,6 +9,13 @@ import threading
 import time
 from typing import Optional, List
 
+try:
+    import yt_dlp
+
+    YT_DLP_AVAILABLE = True
+except ImportError:
+    YT_DLP_AVAILABLE = False
+
 
 class MusicPlayer:
     """
