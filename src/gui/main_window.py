@@ -38,7 +38,7 @@ class TelloApp:
         """アプリケーションの初期化"""
         self.master = master
         self.master.title("Tello Scratch ドローンショー・コントローラー")
-        self.master.geometry("980x800")
+        self.master.geometry("1200x1020")
         self.master.minsize(850, 800)
         self.master.configure(bg=COLOR_BACKGROUND)
 
@@ -171,8 +171,16 @@ class TelloApp:
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         ttk.Button(ip_frame, text="⚙️ 設定を保存", command=self.save_config).pack(
-            fill="x", pady=(10, 0)
+            fill="x", pady=(10, 5)
         )
+
+        self.connect_btn = ttk.Button(
+            ip_frame,
+            text="📡 ドローンに接続",
+            command=self.connect_drones,
+            state="disabled",
+        )
+        self.connect_btn.pack(fill="x", pady=(5, 0))
 
     def _create_file_selection_section(self, parent):
         """プロジェクト選択セクションを作成"""
@@ -203,6 +211,14 @@ class TelloApp:
             text="📁 プロジェクト読込",
             command=self.load_project,
         ).pack(side="left", fill="x", expand=True, padx=(2, 0))
+
+        self.parse_btn = ttk.Button(
+            file_frame,
+            text="🔄 タイムラインを解析",
+            command=self.parse_scratch_project,
+            state="disabled",
+        )
+        self.parse_btn.pack(fill="x", pady=(10, 0))
 
     def _create_action_section(self, parent):
         """ショー実行セクションを作成"""
@@ -238,22 +254,7 @@ class TelloApp:
             command=self.select_audio_file,
         ).pack(side="left", fill="x", expand=True, padx=(2, 0))
 
-        # YouTube URLボタン
-        ttk.Button(
-            music_label_frame,
-            text="📺 YouTube URLから取得",
-            command=self.download_from_youtube,
-        ).pack(fill="x")
-
         ttk.Separator(action_frame, orient="horizontal").pack(fill="x", pady=10)
-
-        self.parse_btn = ttk.Button(
-            action_frame,
-            text="🔄 タイムラインを解析",
-            command=self.parse_scratch_project,
-            state="disabled",
-        )
-        self.parse_btn.pack(fill="x", pady=(0, 5))
 
         self.timeline_viewer_btn = ttk.Button(
             action_frame,
@@ -261,15 +262,7 @@ class TelloApp:
             command=self.open_timeline_viewer,
             state="disabled",
         )
-        self.timeline_viewer_btn.pack(fill="x", pady=(5, 5))
-
-        self.connect_btn = ttk.Button(
-            action_frame,
-            text="📡 ドローンに接続",
-            command=self.connect_drones,
-            state="disabled",
-        )
-        self.connect_btn.pack(fill="x", pady=(5, 5))
+        self.timeline_viewer_btn.pack(fill="x", pady=(0, 5))
 
         self.start_btn = ttk.Button(
             action_frame,
