@@ -7,8 +7,28 @@
 
 import tkinter as tk
 from tkinter import ttk, Canvas
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import math
+import threading
+import os
+import hashlib
+import tempfile
+from pathlib import Path
+
+# 波形表示用のオプショナルインポート
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+try:
+    from pydub import AudioSegment
+
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
 
 from config import (
     COLOR_BACKGROUND,
@@ -25,6 +45,10 @@ from config import (
 
 class TimelineViewerWindow:
     """タイムラインビューアーウィンドウクラス"""
+
+    # 波形キャッシュ（クラス変数）
+    _waveform_cache: Dict[str, Tuple[List[float], float]] = {}
+    _cache_dir = Path(tempfile.gettempdir()) / "tello_waveform_cache"
 
     def __init__(
         self,
@@ -53,9 +77,16 @@ class TimelineViewerWindow:
 
         # タイムラインの設定
         self.pixels_per_second = 50  # 1秒あたりのピクセル数
-        self.track_height = 40  # トラックの高さ
+        self.track_height = 60  # トラックの高さ（波形表示のため増加）
         self.header_width = 150  # ヘッダー部分の幅
         self.timeline_padding = 20  # タイムラインの余白
+
+        # 波形データのキャッシュ（インスタンス変数）
+        self.waveform_data: Dict[str, Tuple[List[float], float]] = {}
+        self.waveform_loading: Dict[str, bool] = {}
+
+        # 音楽ファイルの長さキャッシュ
+        self.music_durations: Dict[str, float] = {}
 
         # ドローンごとのスケジュールを抽出
         self.drone_schedules = self._organize_by_drone()
@@ -72,6 +103,9 @@ class TimelineViewerWindow:
 
         self._create_widgets()
         self._draw_timeline()
+
+        # 波形データを非同期で読み込み
+        self._load_all_waveforms_async()
 
         # ウィンドウを中央に配置
         self.window.update_idletasks()
@@ -93,6 +127,98 @@ class TimelineViewerWindow:
             drone_schedules[target].append(event)
 
         return drone_schedules
+
+    def _get_cache_key(self, music_path: str) -> str:
+        """音楽ファイルのキャッシュキーを生成"""
+        # ファイルパスと更新日時からハッシュを生成
+        try:
+            mtime = os.path.getmtime(music_path)
+            key_str = f"{music_path}:{mtime}"
+            return hashlib.md5(key_str.encode()).hexdigest()
+        except:
+            return hashlib.md5(music_path.encode()).hexdigest()
+
+    def _load_all_waveforms_async(self):
+        """すべての音楽ファイルの波形を非同期で読み込み"""
+        if not NUMPY_AVAILABLE or not PYDUB_AVAILABLE:
+            return
+
+        for music_path in self.music_list:
+            if music_path and os.path.exists(music_path):
+                cache_key = self._get_cache_key(music_path)
+
+                # 既にキャッシュにある場合はスキップ
+                if cache_key in TimelineViewerWindow._waveform_cache:
+                    self.waveform_data[music_path] = (
+                        TimelineViewerWindow._waveform_cache[cache_key]
+                    )
+                    continue
+
+                # 読み込み中フラグ
+                if music_path not in self.waveform_loading:
+                    self.waveform_loading[music_path] = True
+                    thread = threading.Thread(
+                        target=self._load_waveform_data, args=(music_path,), daemon=True
+                    )
+                    thread.start()
+
+    def _load_waveform_data(self, music_path: str):
+        """
+        音楽ファイルから波形データを読み込み（軽量化版）
+
+        Args:
+            music_path: 音楽ファイルのパス
+        """
+        try:
+            # 音声ファイルを読み込み
+            audio = AudioSegment.from_file(music_path)
+
+            # 音楽の長さ（秒）
+            duration = len(audio) / 1000.0
+            self.music_durations[music_path] = duration
+
+            # モノラルに変換（ステレオの場合）
+            if audio.channels == 2:
+                audio = audio.set_channels(1)
+
+            # サンプルレートを下げて軽量化（8000Hzで十分）
+            audio = audio.set_frame_rate(8000)
+
+            # 生のサンプルデータを取得
+            samples = np.array(audio.get_array_of_samples())
+
+            # 波形データをさらにダウンサンプリング
+            # 1秒あたり50ポイント程度に削減（表示用に十分）
+            target_points = int(duration * 50)
+            if len(samples) > target_points:
+                # チャンクごとに最大値を取得（エンベロープ抽出）
+                chunk_size = max(1, len(samples) // target_points)
+                waveform = []
+                for i in range(0, len(samples), chunk_size):
+                    chunk = samples[i : i + chunk_size]
+                    if len(chunk) > 0:
+                        # 絶対値の最大値を取得
+                        waveform.append(float(np.max(np.abs(chunk))))
+            else:
+                waveform = [float(abs(s)) for s in samples]
+
+            # 正規化（0.0 ～ 1.0）
+            max_val = max(waveform) if waveform else 1
+            if max_val > 0:
+                waveform = [v / max_val for v in waveform]
+
+            # キャッシュに保存
+            cache_key = self._get_cache_key(music_path)
+            TimelineViewerWindow._waveform_cache[cache_key] = (waveform, duration)
+            self.waveform_data[music_path] = (waveform, duration)
+
+            # UIを更新（メインスレッドで実行）
+            self.window.after(0, self._draw_timeline)
+
+        except Exception as e:
+            print(f"波形読み込みエラー: {music_path}: {e}")
+        finally:
+            self.waveform_loading[music_path] = False
 
     def _create_widgets(self):
         """UI要素を作成"""
@@ -275,7 +401,7 @@ class TimelineViewerWindow:
                 filename = filename[:17] + "..."
 
             self.canvas.create_text(
-                self.header_width // 2,
+                10,
                 current_y + self.track_height // 2,
                 text=f"🎵 {i + 1}. {filename}",
                 font=FONT_NORMAL,
@@ -283,10 +409,15 @@ class TimelineViewerWindow:
                 anchor="w",
             )
 
-            # 音楽の推定長さ（仮に30秒とする。実際の長さはpygameで取得可能）
-            music_duration = 30.0  # TODO: 実際の音楽ファイルから長さを取得
+            # 音楽の長さを取得（キャッシュまたはデフォルト）
+            if music_path in self.waveform_data:
+                _, music_duration = self.waveform_data[music_path]
+            elif music_path in self.music_durations:
+                music_duration = self.music_durations[music_path]
+            else:
+                music_duration = 30.0  # デフォルト
 
-            # 音楽バー
+            # 音楽バーの位置
             x_start = (
                 self.header_width
                 + self.timeline_padding
@@ -294,6 +425,7 @@ class TimelineViewerWindow:
             )
             x_end = x_start + music_duration * self.pixels_per_second
 
+            # 音楽バーの背景
             self.canvas.create_rectangle(
                 x_start,
                 current_y + 5,
@@ -304,24 +436,106 @@ class TimelineViewerWindow:
                 width=2,
             )
 
-            # 音楽名を中央に表示
+            # 波形を描画
+            self._draw_waveform(music_path, x_start, x_end, current_y)
+
+            # 音楽名を左上に表示
             if len(filename) > 15:
                 display_name = filename[:12] + "..."
             else:
                 display_name = filename
 
             self.canvas.create_text(
-                (x_start + x_end) // 2,
-                current_y + self.track_height // 2,
+                x_start + 5,
+                current_y + 12,
                 text=display_name,
                 font=("Arial", 8),
                 fill="white",
+                anchor="w",
+            )
+
+            # 再生時間を右下に表示
+            duration_text = (
+                f"{int(music_duration // 60)}:{int(music_duration % 60):02d}"
+            )
+            self.canvas.create_text(
+                x_end - 5,
+                current_y + self.track_height - 12,
+                text=duration_text,
+                font=("Arial", 7),
+                fill="white",
+                anchor="e",
             )
 
             current_time += music_duration + self.interval
             current_y += self.track_height
 
         return current_y
+
+    def _draw_waveform(self, music_path: str, x_start: float, x_end: float, y: int):
+        """
+        波形を描画
+
+        Args:
+            music_path: 音楽ファイルのパス
+            x_start: 描画開始X座標
+            x_end: 描画終了X座標
+            y: トラックのY座標
+        """
+        if music_path not in self.waveform_data:
+            # 読み込み中の場合はプレースホルダーを表示
+            if self.waveform_loading.get(music_path, False):
+                self.canvas.create_text(
+                    (x_start + x_end) / 2,
+                    y + self.track_height // 2,
+                    text="波形読み込み中...",
+                    font=("Arial", 8),
+                    fill="#aaccdd",
+                )
+            return
+
+        waveform, _ = self.waveform_data[music_path]
+        if not waveform:
+            return
+
+        # 描画領域のサイズ
+        bar_width = x_end - x_start
+        bar_height = self.track_height - 20  # 上下のパディング
+        center_y = y + self.track_height // 2
+
+        # 波形ポイント数を画面幅に合わせて調整
+        num_points = min(len(waveform), int(bar_width / 2))  # 2ピクセルごとに1ポイント
+        if num_points <= 0:
+            return
+
+        # ダウンサンプリング
+        step = max(1, len(waveform) // num_points)
+
+        # 波形を描画（ミラー表示）
+        points_upper = []
+        points_lower = []
+
+        for i in range(0, len(waveform), step):
+            x = x_start + (i / len(waveform)) * bar_width
+            amplitude = waveform[i] * (bar_height / 2) * 0.8  # 80%の高さに制限
+
+            points_upper.append((x, center_y - amplitude))
+            points_lower.append((x, center_y + amplitude))
+
+        # ポイントが十分にある場合は波形を描画
+        if len(points_upper) >= 2:
+            # 上半分と下半分を結合してポリゴンを作成
+            all_points = points_upper + list(reversed(points_lower))
+            flat_points = [coord for point in all_points for coord in point]
+
+            # 波形を明るい色で塗りつぶし（Tkinterは透明非対応のため不透明色を使用）
+            self.canvas.create_polygon(
+                flat_points,
+                fill="#b8d4e8",  # 明るい青白色
+                outline="#d0e8f4",  # より明るいアウトライン
+                width=1,
+                smooth=True,
+            )
 
     def _draw_drone_tracks(self, start_y: int, width: int):
         """ドローントラックを描画"""
