@@ -87,6 +87,9 @@ class TimelineViewerWindow:
 
         # 音楽ファイルの長さキャッシュ
         self.music_durations: Dict[str, float] = {}
+        
+        # YouTubeタイトルのキャッシュ
+        self.youtube_titles: Dict[str, str] = {}
 
         # ドローンごとのスケジュールを抽出
         self.drone_schedules = self._organize_by_drone()
@@ -106,6 +109,9 @@ class TimelineViewerWindow:
 
         # 波形データを非同期で読み込み
         self._load_all_waveforms_async()
+        
+        # YouTubeタイトルを非同期で取得
+        self._load_youtube_titles_async()
 
         # ウィンドウを中央に配置
         self.window.update_idletasks()
@@ -130,13 +136,56 @@ class TimelineViewerWindow:
 
     def _get_cache_key(self, music_path: str) -> str:
         """音楽ファイルのキャッシュキーを生成"""
+        # 実際のファイルパスを取得
+        actual_path = self._resolve_music_path(music_path)
+        if not actual_path:
+            return hashlib.md5(music_path.encode()).hexdigest()
+        
         # ファイルパスと更新日時からハッシュを生成
         try:
-            mtime = os.path.getmtime(music_path)
-            key_str = f"{music_path}:{mtime}"
+            mtime = os.path.getmtime(actual_path)
+            key_str = f"{actual_path}:{mtime}"
             return hashlib.md5(key_str.encode()).hexdigest()
         except:
-            return hashlib.md5(music_path.encode()).hexdigest()
+            return hashlib.md5(actual_path.encode()).hexdigest()
+
+    def _is_youtube_url(self, url: str) -> bool:
+        """YouTube URLかどうかを判定"""
+        if not url:
+            return False
+        return url.startswith(("http://", "https://")) and (
+            "youtube.com" in url or "youtu.be" in url
+        )
+
+    def _resolve_music_path(self, music_path: str) -> Optional[str]:
+        """
+        音楽パスを実際のファイルパスに解決
+        YouTube URLの場合はキャッシュファイルのパスを返す
+        
+        Args:
+            music_path: 音楽ファイルのパスまたはYouTube URL
+            
+        Returns:
+            実際のファイルパス、存在しない場合はNone
+        """
+        if not music_path:
+            return None
+        
+        # YouTube URLの場合
+        if self._is_youtube_url(music_path):
+            # MusicPlayerのキャッシュディレクトリを使用
+            if hasattr(self.music_player, 'temp_dir'):
+                url_hash = hashlib.md5(music_path.encode()).hexdigest()
+                cache_file = self.music_player.temp_dir / f"{url_hash}.mp3"
+                if cache_file.exists():
+                    return str(cache_file)
+            return None
+        
+        # 通常のファイルパス
+        if os.path.exists(music_path):
+            return music_path
+        
+        return None
 
     def _load_all_waveforms_async(self):
         """すべての音楽ファイルの波形を非同期で読み込み"""
@@ -144,7 +193,9 @@ class TimelineViewerWindow:
             return
 
         for music_path in self.music_list:
-            if music_path and os.path.exists(music_path):
+            # 実際のファイルパスを解決
+            actual_path = self._resolve_music_path(music_path)
+            if actual_path:
                 cache_key = self._get_cache_key(music_path)
 
                 # 既にキャッシュにある場合はスキップ
@@ -158,20 +209,58 @@ class TimelineViewerWindow:
                 if music_path not in self.waveform_loading:
                     self.waveform_loading[music_path] = True
                     thread = threading.Thread(
-                        target=self._load_waveform_data, args=(music_path,), daemon=True
+                        target=self._load_waveform_data, 
+                        args=(music_path, actual_path), 
+                        daemon=True
                     )
                     thread.start()
 
-    def _load_waveform_data(self, music_path: str):
+    def _load_youtube_titles_async(self):
+        """YouTubeタイトルを非同期で取得"""
+        for music_path in self.music_list:
+            if self._is_youtube_url(music_path) and music_path not in self.youtube_titles:
+                thread = threading.Thread(
+                    target=self._load_youtube_title,
+                    args=(music_path,),
+                    daemon=True
+                )
+                thread.start()
+
+    def _load_youtube_title(self, url: str):
+        """
+        YouTubeタイトルを取得
+        
+        Args:
+            url: YouTube URL
+        """
+        try:
+            import yt_dlp
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                title = info.get("title", "Unknown")
+                self.youtube_titles[url] = title
+                # UIを更新
+                self.window.after(0, self._draw_timeline)
+        except Exception as e:
+            print(f"YouTubeタイトル取得エラー: {url}: {e}")
+            self.youtube_titles[url] = "YouTube"
+
+    def _load_waveform_data(self, music_path: str, actual_path: str):
         """
         音楽ファイルから波形データを読み込み（軽量化版）
 
         Args:
-            music_path: 音楽ファイルのパス
+            music_path: 元の音楽パス（YouTube URLまたはファイルパス）
+            actual_path: 実際のファイルパス
         """
         try:
             # 音声ファイルを読み込み
-            audio = AudioSegment.from_file(music_path)
+            audio = AudioSegment.from_file(actual_path)
 
             # 音楽の長さ（秒）
             duration = len(audio) / 1000.0
@@ -395,8 +484,13 @@ class TimelineViewerWindow:
                 outline="#ccc",
             )
 
-            # ヘッダー
-            filename = music_path.split("/")[-1].split("\\")[-1]
+            # ヘッダー - YouTubeの場合はタイトルを表示
+            if self._is_youtube_url(music_path):
+                title = self.youtube_titles.get(music_path, "YouTube")
+                filename = f"🎬 {title}"
+            else:
+                filename = music_path.split("/")[-1].split("\\")[-1]
+            
             if len(filename) > 20:
                 filename = filename[:17] + "..."
 

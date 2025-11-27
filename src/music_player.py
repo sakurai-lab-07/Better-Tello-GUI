@@ -225,6 +225,15 @@ class MusicPlayer:
         """
         self.current_music = music_path
 
+    def get_music_list(self) -> list:
+        """
+        メドレー用の音楽リストを取得
+
+        Returns:
+            音楽ファイルパスのリスト
+        """
+        return self.music_list.copy() if self.music_list else []
+
     def get_interval(self) -> float:
         """
         曲間インターバルを取得

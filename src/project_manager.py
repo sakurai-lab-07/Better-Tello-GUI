@@ -41,6 +41,7 @@ class ProjectManager:
         music_list=None,
         music_interval=0.0,
         drone_config=None,
+        youtube_titles=None,
     ):
         """
         プロジェクトを保存
@@ -54,6 +55,7 @@ class ProjectManager:
             music_list: 音楽ファイルのリスト
             music_interval: 曲間インターバル（秒）
             drone_config: ドローン設定情報
+            youtube_titles: YouTube URLとタイトルの辞書
 
         Returns:
             bool: 保存が成功したかどうか
@@ -86,13 +88,15 @@ class ProjectManager:
                 for music_path in music_list:
                     # YouTube URLかどうかをチェック
                     if music_path.startswith(("http://", "https://")):
-                        # YouTube URLはそのまま保存
-                        project_data["music"]["list"].append(
-                            {
-                                "type": "url",
-                                "url": music_path,
-                            }
-                        )
+                        # YouTube URLはそのまま保存（タイトルも保存）
+                        music_entry = {
+                            "type": "url",
+                            "url": music_path,
+                        }
+                        # タイトルがあれば保存
+                        if youtube_titles and music_path in youtube_titles:
+                            music_entry["title"] = youtube_titles[music_path]
+                        project_data["music"]["list"].append(music_entry)
                         self._log("INFO", f"YouTube URLを保存しました: {music_path}")
                     elif os.path.exists(music_path):
                         # ローカルファイルはBase64エンコードして埋め込み
@@ -159,6 +163,7 @@ class ProjectManager:
                 "music_paths": [],
                 "music_interval": project_data.get("music", {}).get("interval", 0.0),
                 "drone_config": project_data.get("drone_config", {}),
+                "youtube_titles": {},
             }
 
             # 一時ディレクトリの作成
@@ -187,6 +192,10 @@ class ProjectManager:
                     url = music_item.get("url")
                     if url:
                         result["music_paths"].append(url)
+                        # タイトルがあれば復元
+                        title = music_item.get("title")
+                        if title:
+                            result["youtube_titles"][url] = title
                         self._log("INFO", f"YouTube URLを読み込みました: {url}")
                 else:
                     # ローカルファイルを復元

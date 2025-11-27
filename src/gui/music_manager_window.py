@@ -22,7 +22,7 @@ from youtube_downloader import YouTubeDownloader
 class MusicManagerWindow:
     """音楽管理ウィンドウクラス"""
 
-    def __init__(self, parent, music_player, music_list, on_save_callback):
+    def __init__(self, parent, music_player, music_list, on_save_callback, youtube_titles=None):
         """
         音楽管理ウィンドウの初期化
 
@@ -31,6 +31,7 @@ class MusicManagerWindow:
             music_player: MusicPlayerインスタンス
             music_list: 現在の音楽リスト
             on_save_callback: 保存時のコールバック関数
+            youtube_titles: YouTubeタイトルのキャッシュ（辞書）
         """
         self.parent = parent
         self.music_player = music_player
@@ -44,6 +45,12 @@ class MusicManagerWindow:
 
         # インターバル設定（デフォルト0秒）
         self.interval_seconds = tk.DoubleVar(value=music_player.get_interval())
+
+        # プレビュー音量設定（デフォルト50%）
+        self.preview_volume = tk.DoubleVar(value=0.5)
+
+        # YouTubeタイトルのキャッシュ（渡されたものがあれば使用）
+        self.youtube_titles: dict = youtube_titles.copy() if youtube_titles else {}
 
         # ウィンドウの作成
         self.window = tk.Toplevel(parent)
@@ -162,6 +169,23 @@ class MusicManagerWindow:
             pady=2
         )
 
+        # 音量スライダー
+        ttk.Label(btn_frame, text="音量:", style="MusicManager.TLabel").pack(pady=(10, 0))
+        volume_scale = ttk.Scale(
+            btn_frame,
+            from_=0.0,
+            to=1.0,
+            orient="horizontal",
+            variable=self.preview_volume,
+            command=self._on_volume_change,
+            length=80,
+        )
+        volume_scale.pack(pady=2)
+        self.volume_label = ttk.Label(
+            btn_frame, text="50%", style="MusicManager.TLabel", font=("Arial", 8)
+        )
+        self.volume_label.pack()
+
         # インターバル設定フレーム
         interval_frame = ttk.LabelFrame(
             main_frame, text="⏱️ 曲間インターバル設定", padding="10"
@@ -243,7 +267,12 @@ class MusicManagerWindow:
             if music_path.startswith("http") and (
                 "youtube" in music_path or "youtu.be" in music_path
             ):
-                display_name = f"🎬 YouTube: {music_path[:50]}..."
+                # キャッシュされたタイトルを使用、なければURL
+                title = self.youtube_titles.get(music_path, None)
+                if title:
+                    display_name = f"🎬 {title[:40]}" + ("..." if len(title) > 40 else "")
+                else:
+                    display_name = f"🎬 YouTube: {music_path[:40]}..."
             else:
                 display_name = os.path.basename(music_path)
             self.listbox.insert(tk.END, f"{i}. {display_name}")
@@ -394,6 +423,9 @@ class MusicManagerWindow:
         # URLが追加された場合、リストに追加
         if result["youtube_url"]:
             self.music_list.append(result["youtube_url"])
+            # タイトルをキャッシュに保存
+            if result.get("title"):
+                self.youtube_titles[result["youtube_url"]] = result["title"]
             self._refresh_list()
 
             # 追加したファイルを選択
@@ -446,6 +478,12 @@ class MusicManagerWindow:
             self._refresh_list()
             self.listbox.selection_set(index + 1)
 
+    def _on_volume_change(self, value):
+        """音量スライダーの変更時"""
+        volume = float(value)
+        self.music_player.set_volume(volume)
+        self.volume_label.config(text=f"{int(volume * 100)}%")
+
     def _preview_selected(self):
         """選択中の音楽をプレビュー"""
         selection = self.listbox.curselection()
@@ -462,10 +500,18 @@ class MusicManagerWindow:
         # 一時的に音楽リストをクリアして単一ファイルとして再生
         self.music_player.set_music_list([])  # メドレーリストをクリア
         self.music_player.set_music(self.music_list[index])  # 選択した曲を設定
+        
+        # 音量を設定してから再生
+        self.music_player.set_volume(self.preview_volume.get())
         self.music_player.play(self.music_list[index], delay_seconds=0)
 
         # ステータス更新
-        filename = os.path.basename(self.music_list[index])
+        music_path = self.music_list[index]
+        if music_path.startswith("http") and ("youtube" in music_path or "youtu.be" in music_path):
+            # YouTubeの場合はタイトルを表示
+            filename = self.youtube_titles.get(music_path, "YouTube")
+        else:
+            filename = os.path.basename(music_path)
         self.info_label.config(
             text=f"🔊 プレビュー中: {filename}", foreground=COLOR_ACCENT
         )
@@ -510,8 +556,8 @@ class MusicManagerWindow:
         interval = self.interval_seconds.get()
         self.music_player.set_interval(interval)
 
-        # コールバックを呼び出し（音楽リストとインターバルを渡す）
-        self.on_save_callback(self.music_list, interval)
+        # コールバックを呼び出し（音楽リスト、インターバル、YouTubeタイトルを渡す）
+        self.on_save_callback(self.music_list, interval, self.youtube_titles)
 
         # ウィンドウを閉じる
         self.window.destroy()

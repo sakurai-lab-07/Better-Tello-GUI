@@ -90,6 +90,7 @@ class TelloApp:
         # 音楽関連
         self.music_list = []  # メドレー用の音楽リスト
         self.is_medley_mode = False  # メドレーモードかどうか
+        self.youtube_titles = {}  # YouTubeタイトルのキャッシュ
 
         # 音楽プレイヤー初期化
         self.music_player = MusicPlayer(log_callback=self.log)
@@ -644,18 +645,24 @@ class TelloApp:
         from gui.music_manager_window import MusicManagerWindow
 
         MusicManagerWindow(
-            self.master, self.music_player, self.music_list, self._on_music_list_saved
+            self.master, self.music_player, self.music_list, self._on_music_list_saved,
+            youtube_titles=self.youtube_titles,
         )
 
-    def _on_music_list_saved(self, music_list: list, interval: float):
+    def _on_music_list_saved(self, music_list: list, interval: float, youtube_titles: dict = None):
         """
         音楽管理ウィンドウから音楽リストが保存された時の処理
 
         Args:
             music_list: 保存された音楽ファイルリスト
             interval: 曲間インターバル（秒）
+            youtube_titles: YouTubeタイトルの辞書
         """
         self.music_list = music_list
+        
+        # YouTubeタイトルを更新
+        if youtube_titles:
+            self.youtube_titles.update(youtube_titles)
 
         if music_list:
             self.is_medley_mode = True
@@ -752,6 +759,7 @@ class TelloApp:
             music_list=music_list,
             music_interval=self.music_player.get_interval(),
             drone_config=drone_config,
+            youtube_titles=self.youtube_titles,
         )
 
         if success:
@@ -808,6 +816,9 @@ class TelloApp:
         # 音楽設定を復元
         music_paths = project_data["music_paths"]
         music_interval = project_data["music_interval"]
+        
+        # YouTubeタイトルを復元
+        self.youtube_titles = project_data.get("youtube_titles", {})
 
         if music_paths:
             # 音楽リストを内部変数に保存
