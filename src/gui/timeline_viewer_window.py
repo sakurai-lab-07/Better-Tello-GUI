@@ -87,9 +87,13 @@ class TimelineViewerWindow:
 
         # 音楽ファイルの長さキャッシュ
         self.music_durations: Dict[str, float] = {}
-        
+
         # YouTubeタイトルのキャッシュ
         self.youtube_titles: Dict[str, str] = {}
+
+        # 再描画デバウンス用
+        self._redraw_scheduled = False
+        self._redraw_delay = 100  # ms
 
         # ドローンごとのスケジュールを抽出
         self.drone_schedules = self._organize_by_drone()
@@ -109,7 +113,7 @@ class TimelineViewerWindow:
 
         # 波形データを非同期で読み込み
         self._load_all_waveforms_async()
-        
+
         # YouTubeタイトルを非同期で取得
         self._load_youtube_titles_async()
 
@@ -119,8 +123,19 @@ class TimelineViewerWindow:
         y = (self.window.winfo_screenheight() // 2) - (self.window.winfo_height() // 2)
         self.window.geometry(f"+{x}+{y}")
 
+    def _schedule_redraw(self):
+        """再描画をスケジュール（デバウンス）"""
+        if not self._redraw_scheduled:
+            self._redraw_scheduled = True
+            self.window.after(self._redraw_delay, self._do_redraw)
+
+    def _do_redraw(self):
+        """実際の再描画を実行"""
+        self._redraw_scheduled = False
+        self._draw_timeline()
+
     def _organize_by_drone(self) -> Dict[str, List[Dict]]:
-        """スケジュールをドローンごとに整理"""
+        """スケジュールをドローンごとに整理（ALLとTAKEOFFは除外）"""
         drone_schedules = {}
 
         if not self.schedule:
@@ -128,6 +143,12 @@ class TimelineViewerWindow:
 
         for event in self.schedule:
             target = event.get("target", "Unknown")
+            event_type = event.get("type", "")
+
+            # ALLターゲットとTAKEOFFイベントは離陸トラックで表示するので除外
+            if target == "ALL" or event_type == "TAKEOFF":
+                continue
+
             if target not in drone_schedules:
                 drone_schedules[target] = []
             drone_schedules[target].append(event)
@@ -140,7 +161,7 @@ class TimelineViewerWindow:
         actual_path = self._resolve_music_path(music_path)
         if not actual_path:
             return hashlib.md5(music_path.encode()).hexdigest()
-        
+
         # ファイルパスと更新日時からハッシュを生成
         try:
             mtime = os.path.getmtime(actual_path)
@@ -161,30 +182,30 @@ class TimelineViewerWindow:
         """
         音楽パスを実際のファイルパスに解決
         YouTube URLの場合はキャッシュファイルのパスを返す
-        
+
         Args:
             music_path: 音楽ファイルのパスまたはYouTube URL
-            
+
         Returns:
             実際のファイルパス、存在しない場合はNone
         """
         if not music_path:
             return None
-        
+
         # YouTube URLの場合
         if self._is_youtube_url(music_path):
             # MusicPlayerのキャッシュディレクトリを使用
-            if hasattr(self.music_player, 'temp_dir'):
+            if hasattr(self.music_player, "temp_dir"):
                 url_hash = hashlib.md5(music_path.encode()).hexdigest()
                 cache_file = self.music_player.temp_dir / f"{url_hash}.mp3"
                 if cache_file.exists():
                     return str(cache_file)
             return None
-        
+
         # 通常のファイルパス
         if os.path.exists(music_path):
             return music_path
-        
+
         return None
 
     def _load_all_waveforms_async(self):
@@ -209,32 +230,34 @@ class TimelineViewerWindow:
                 if music_path not in self.waveform_loading:
                     self.waveform_loading[music_path] = True
                     thread = threading.Thread(
-                        target=self._load_waveform_data, 
-                        args=(music_path, actual_path), 
-                        daemon=True
+                        target=self._load_waveform_data,
+                        args=(music_path, actual_path),
+                        daemon=True,
                     )
                     thread.start()
 
     def _load_youtube_titles_async(self):
         """YouTubeタイトルを非同期で取得"""
         for music_path in self.music_list:
-            if self._is_youtube_url(music_path) and music_path not in self.youtube_titles:
+            if (
+                self._is_youtube_url(music_path)
+                and music_path not in self.youtube_titles
+            ):
                 thread = threading.Thread(
-                    target=self._load_youtube_title,
-                    args=(music_path,),
-                    daemon=True
+                    target=self._load_youtube_title, args=(music_path,), daemon=True
                 )
                 thread.start()
 
     def _load_youtube_title(self, url: str):
         """
         YouTubeタイトルを取得
-        
+
         Args:
             url: YouTube URL
         """
         try:
             import yt_dlp
+
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -244,8 +267,8 @@ class TimelineViewerWindow:
                 info = ydl.extract_info(url, download=False)
                 title = info.get("title", "Unknown")
                 self.youtube_titles[url] = title
-                # UIを更新
-                self.window.after(0, self._draw_timeline)
+                # UIを更新（デバウンス付き）
+                self.window.after(0, self._schedule_redraw)
         except Exception as e:
             print(f"YouTubeタイトル取得エラー: {url}: {e}")
             self.youtube_titles[url] = "YouTube"
@@ -277,8 +300,8 @@ class TimelineViewerWindow:
             samples = np.array(audio.get_array_of_samples())
 
             # 波形データをさらにダウンサンプリング
-            # 1秒あたり50ポイント程度に削減（表示用に十分）
-            target_points = int(duration * 50)
+            # 1秒あたり30ポイント程度に削減（表示用に十分、軽量化）
+            target_points = int(duration * 30)
             if len(samples) > target_points:
                 # チャンクごとに最大値を取得（エンベロープ抽出）
                 chunk_size = max(1, len(samples) // target_points)
@@ -301,8 +324,8 @@ class TimelineViewerWindow:
             TimelineViewerWindow._waveform_cache[cache_key] = (waveform, duration)
             self.waveform_data[music_path] = (waveform, duration)
 
-            # UIを更新（メインスレッドで実行）
-            self.window.after(0, self._draw_timeline)
+            # UIを更新（メインスレッドでデバウンス付きで実行）
+            self.window.after(0, self._schedule_redraw)
 
         except Exception as e:
             print(f"波形読み込みエラー: {music_path}: {e}")
@@ -391,11 +414,23 @@ class TimelineViewerWindow:
         """タイムラインを描画"""
         self.canvas.delete("all")
 
+        # TAKEOFFイベントまたはALLターゲットのイベントがあるか確認
+        has_takeoff = (
+            any(
+                event.get("type") == "TAKEOFF" or event.get("target") == "ALL"
+                for event in self.schedule
+            )
+            if self.schedule
+            else False
+        )
+
         # 計算
         timeline_width = int(
             self.total_time * self.pixels_per_second + self.timeline_padding * 2
         )
         num_tracks = len(self.music_list) + len(self.drone_schedules)
+        if has_takeoff:
+            num_tracks += 1  # TAKEOFFトラック用に1つ追加
         timeline_height = (
             num_tracks + 1
         ) * self.track_height + self.timeline_padding * 2
@@ -419,8 +454,12 @@ class TimelineViewerWindow:
         if self.music_list:
             current_y = self._draw_music_tracks(current_y, timeline_width)
 
-        # ドローントラックを描画
-        self._draw_drone_tracks(current_y, timeline_width)
+        # ドローントラックを描画（TAKEOFFを除く）
+        current_y = self._draw_drone_tracks(current_y, timeline_width)
+
+        # TAKEOFFトラックを最後に描画
+        if has_takeoff:
+            self._draw_takeoff_track(current_y, timeline_width)
 
     def _draw_time_scale(self, y: int, width: int):
         """タイムスケールを描画"""
@@ -490,7 +529,7 @@ class TimelineViewerWindow:
                 filename = f"🎬 {title}"
             else:
                 filename = music_path.split("/")[-1].split("\\")[-1]
-            
+
             if len(filename) > 20:
                 filename = filename[:17] + "..."
 
@@ -597,21 +636,25 @@ class TimelineViewerWindow:
         bar_height = self.track_height - 20  # 上下のパディング
         center_y = y + self.track_height // 2
 
-        # 波形ポイント数を画面幅に合わせて調整
-        num_points = min(len(waveform), int(bar_width / 2))  # 2ピクセルごとに1ポイント
+        # 波形ポイント数を画面幅に合わせて調整（3ピクセルごとに1ポイントに削減）
+        num_points = min(len(waveform), int(bar_width / 3))
         if num_points <= 0:
             return
 
         # ダウンサンプリング
         step = max(1, len(waveform) // num_points)
 
-        # 波形を描画（ミラー表示）
+        # 波形を描画（ミラー表示）- リスト内包表記で最適化
         points_upper = []
         points_lower = []
 
-        for i in range(0, len(waveform), step):
-            x = x_start + (i / len(waveform)) * bar_width
-            amplitude = waveform[i] * (bar_height / 2) * 0.8  # 80%の高さに制限
+        # バッチ処理でポイントを計算
+        waveform_len = len(waveform)
+        height_factor = (bar_height / 2) * 0.8
+
+        for i in range(0, waveform_len, step):
+            x = x_start + (i / waveform_len) * bar_width
+            amplitude = waveform[i] * height_factor
 
             points_upper.append((x, center_y - amplitude))
             points_lower.append((x, center_y + amplitude))
@@ -622,17 +665,21 @@ class TimelineViewerWindow:
             all_points = points_upper + list(reversed(points_lower))
             flat_points = [coord for point in all_points for coord in point]
 
-            # 波形を明るい色で塗りつぶし（Tkinterは透明非対応のため不透明色を使用）
+            # 波形を明るい色で塗りつぶし（smooth=Falseで軽量化）
             self.canvas.create_polygon(
                 flat_points,
                 fill="#b8d4e8",  # 明るい青白色
-                outline="#d0e8f4",  # より明るいアウトライン
-                width=1,
-                smooth=True,
+                outline="",  # アウトラインを削除して軽量化
+                width=0,
+                smooth=False,  # スムーズ処理を無効化して軽量化
             )
 
-    def _draw_drone_tracks(self, start_y: int, width: int):
-        """ドローントラックを描画"""
+    def _draw_drone_tracks(self, start_y: int, width: int) -> int:
+        """ドローントラックを描画（TAKEOFFイベントを除く）
+
+        Returns:
+            次のトラックのY座標
+        """
         current_y = start_y
 
         for drone_name, events in sorted(self.drone_schedules.items()):
@@ -656,10 +703,15 @@ class TimelineViewerWindow:
                 anchor="w",
             )
 
-            # イベントごとにバーを描画
+            # イベントごとにバーを描画（TAKEOFFは除く）
             for event in events:
-                event_time = event.get("time", 0)
                 event_type = event.get("type", "INFO")
+
+                # TAKEOFFは別トラックで描画するのでスキップ
+                if event_type == "TAKEOFF":
+                    continue
+
+                event_time = event.get("time", 0)
 
                 # イベントの推定所要時間（コマンドによって異なる）
                 duration = self._estimate_event_duration(event)
@@ -672,12 +724,12 @@ class TimelineViewerWindow:
                 x_end = x_start + duration * self.pixels_per_second
 
                 # イベントタイプによって色を変える
-                if event_type == "TAKEOFF":
-                    color = COLOR_SUCCESS
-                elif event_type == "LAND":
+                if event_type == "LAND":
                     color = COLOR_ERROR
                 elif event_type == "COMMAND":
-                    color = COLOR_WARNING
+                    # コマンドの内容で色分け
+                    command = event.get("command", "")
+                    color = self._get_command_color(command)
                 else:
                     color = "#ccc"
 
@@ -707,6 +759,118 @@ class TimelineViewerWindow:
                     )
 
             current_y += self.track_height
+
+        return current_y
+
+    def _draw_takeoff_track(self, start_y: int, width: int):
+        """TAKEOFFイベントとALLターゲットを専用トラックとして描画（タイムラインの最後）"""
+        current_y = start_y
+
+        # TAKEOFFイベントとALLターゲットのイベントを収集
+        takeoff_events = (
+            [
+                event
+                for event in self.schedule
+                if event.get("type") == "TAKEOFF" or event.get("target") == "ALL"
+            ]
+            if self.schedule
+            else []
+        )
+
+        if not takeoff_events:
+            return
+
+        # トラック背景
+        self.canvas.create_rectangle(
+            0,
+            current_y,
+            self.header_width + width,
+            current_y + self.track_height,
+            fill="#e8f8e8",  # 薄い緑色の背景
+            outline="#ccc",
+        )
+
+        # ヘッダー
+        self.canvas.create_text(
+            self.header_width // 2,
+            current_y + self.track_height // 2,
+            text="🛫 離陸",
+            font=FONT_NORMAL,
+            fill=COLOR_SUCCESS,
+            anchor="w",
+        )
+
+        # TAKEOFFイベントを描画
+        for event in takeoff_events:
+            event_time = event.get("time", 0)
+            duration = self._estimate_event_duration(event)
+
+            x_start = (
+                self.header_width
+                + self.timeline_padding
+                + event_time * self.pixels_per_second
+            )
+            x_end = x_start + duration * self.pixels_per_second
+
+            # イベントバー
+            self.canvas.create_rectangle(
+                x_start,
+                current_y + 8,
+                x_end,
+                current_y + self.track_height - 8,
+                fill=COLOR_SUCCESS,
+                outline=COLOR_SUCCESS,
+                width=1,
+            )
+
+            # イベント名
+            event_text = event.get("text", "離陸")
+            if len(event_text) > 20:
+                event_text = event_text[:17] + "..."
+
+            if x_end - x_start > 30:
+                self.canvas.create_text(
+                    (x_start + x_end) // 2,
+                    current_y + self.track_height // 2,
+                    text=event_text,
+                    font=("Arial", 7),
+                    fill="white",
+                )
+
+    def _get_command_color(self, command: str) -> str:
+        """
+        コマンドの内容に応じた色を返す
+
+        Args:
+            command: ドローンコマンド文字列
+
+        Returns:
+            色コード（HEX形式）
+        """
+        command_lower = command.lower()
+
+        # 左右移動（left/right）- 青系
+        if "left" in command_lower or "right" in command_lower:
+            return "#3498db"  # 明るい青
+
+        # 上下移動（up/down）- 紫系
+        if "up" in command_lower or "down" in command_lower:
+            return "#9b59b6"  # 紫
+
+        # 前後移動（forward/back）- オレンジ系
+        if "forward" in command_lower or "back" in command_lower:
+            return "#e67e22"  # オレンジ
+
+        # 回転（cw/ccw/rotate）- ピンク系
+        if "cw" in command_lower or "ccw" in command_lower or "rotate" in command_lower:
+            return "#e91e63"  # ピンク
+
+        # フリップ - 水色
+        if "flip" in command_lower:
+            return "#00bcd4"  # シアン
+
+        # その他のコマンド - グレー
+        return "#7f8c8d"
 
     def _estimate_event_duration(self, event: Dict) -> float:
         """イベントの推定所要時間を計算（秒）"""

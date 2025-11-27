@@ -92,6 +92,9 @@ class TelloApp:
         self.is_medley_mode = False  # メドレーモードかどうか
         self.youtube_titles = {}  # YouTubeタイトルのキャッシュ
 
+        # プロジェクト関連
+        self.current_project_path = None  # 現在のプロジェクトパス
+
         # 音楽プレイヤー初期化
         self.music_player = MusicPlayer(log_callback=self.log)
 
@@ -645,11 +648,16 @@ class TelloApp:
         from gui.music_manager_window import MusicManagerWindow
 
         MusicManagerWindow(
-            self.master, self.music_player, self.music_list, self._on_music_list_saved,
+            self.master,
+            self.music_player,
+            self.music_list,
+            self._on_music_list_saved,
             youtube_titles=self.youtube_titles,
         )
 
-    def _on_music_list_saved(self, music_list: list, interval: float, youtube_titles: dict = None):
+    def _on_music_list_saved(
+        self, music_list: list, interval: float, youtube_titles: dict = None
+    ):
         """
         音楽管理ウィンドウから音楽リストが保存された時の処理
 
@@ -659,7 +667,7 @@ class TelloApp:
             youtube_titles: YouTubeタイトルの辞書
         """
         self.music_list = music_list
-        
+
         # YouTubeタイトルを更新
         if youtube_titles:
             self.youtube_titles.update(youtube_titles)
@@ -816,7 +824,7 @@ class TelloApp:
         # 音楽設定を復元
         music_paths = project_data["music_paths"]
         music_interval = project_data["music_interval"]
-        
+
         # YouTubeタイトルを復元
         self.youtube_titles = project_data.get("youtube_titles", {})
 
@@ -1143,10 +1151,15 @@ class TelloApp:
         self.log_queue.put(log_item)
 
     def process_log_queue(self):
-        """ログキューを処理してUIを更新"""
+        """ログキューを処理してUIを更新（バッチ処理で最適化）"""
         try:
-            while not self.log_queue.empty():
+            messages_to_add = []
+            max_batch_size = 50  # 1回の処理で最大50件まで
+            processed = 0
+
+            while not self.log_queue.empty() and processed < max_batch_size:
                 log_item = self.log_queue.get_nowait()
+                processed += 1
 
                 # 特殊なメッセージタイプの処理
                 if isinstance(log_item, dict) and "type" in log_item:
@@ -1174,7 +1187,7 @@ class TelloApp:
                         self._reset_ui_to_parsed_state()
                         continue
 
-                # 通常のログメッセージ
+                # 通常のログメッセージをバッチに追加
                 if isinstance(log_item, dict):
                     level = log_item.get("level", LOG_LEVEL_INFO)
                     message = log_item.get("message", "")
@@ -1182,8 +1195,13 @@ class TelloApp:
                     level = LOG_LEVEL_INFO
                     message = str(log_item)
 
+                messages_to_add.append((message, level))
+
+            # バッチでログを追加（UI操作を最小化）
+            if messages_to_add:
                 self.log_text.config(state="normal")
-                self.log_text.insert(tk.END, message + "\n", level)
+                for message, level in messages_to_add:
+                    self.log_text.insert(tk.END, message + "\n", level)
                 self.log_text.see(tk.END)
                 self.log_text.config(state="disabled")
         finally:

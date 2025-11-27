@@ -27,8 +27,8 @@ COLOR_TEXT = "#333"
 COLOR_HIGHLIGHT = "#d0e9f8"
 
 # ウィンドウ設定
-WINDOW_TITLE = "Tello Scratch ドローンショー・コントローラー (最終安定版)"
-WINDOW_SIZE = "900x700"
+WINDOW_TITLE = "Drone Show Controller for Tello Scratch"
+WINDOW_SIZE = "1500x1200"
 WINDOW_MIN_SIZE = (800, 600)
 MAIN_PADDING = 15
 
@@ -48,7 +48,7 @@ SUPPORTED_AUDIO_FILES = [
 ]
 
 # UI更新間隔（ミリ秒）
-LOG_QUEUE_UPDATE_INTERVAL = 100
+LOG_QUEUE_UPDATE_INTERVAL = 200  # パフォーマンス最適化のため200msに設定
 
 # ログレベル
 LOG_LEVEL_INFO = "INFO"

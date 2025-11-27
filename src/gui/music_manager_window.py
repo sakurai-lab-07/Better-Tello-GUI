@@ -22,7 +22,9 @@ from youtube_downloader import YouTubeDownloader
 class MusicManagerWindow:
     """音楽管理ウィンドウクラス"""
 
-    def __init__(self, parent, music_player, music_list, on_save_callback, youtube_titles=None):
+    def __init__(
+        self, parent, music_player, music_list, on_save_callback, youtube_titles=None
+    ):
         """
         音楽管理ウィンドウの初期化
 
@@ -170,7 +172,9 @@ class MusicManagerWindow:
         )
 
         # 音量スライダー
-        ttk.Label(btn_frame, text="音量:", style="MusicManager.TLabel").pack(pady=(10, 0))
+        ttk.Label(btn_frame, text="音量:", style="MusicManager.TLabel").pack(
+            pady=(10, 0)
+        )
         volume_scale = ttk.Scale(
             btn_frame,
             from_=0.0,
@@ -270,7 +274,9 @@ class MusicManagerWindow:
                 # キャッシュされたタイトルを使用、なければURL
                 title = self.youtube_titles.get(music_path, None)
                 if title:
-                    display_name = f"🎬 {title[:40]}" + ("..." if len(title) > 40 else "")
+                    display_name = f"🎬 {title[:40]}" + (
+                        "..." if len(title) > 40 else ""
+                    )
                 else:
                     display_name = f"🎬 YouTube: {music_path[:40]}..."
             else:
@@ -327,7 +333,7 @@ class MusicManagerWindow:
         # URL入力ダイアログを作成
         dialog = tk.Toplevel(self.window)
         dialog.title("YouTube音源設定")
-        dialog.geometry("500x200")
+        dialog.geometry("500x250")
         dialog.transient(self.window)
         dialog.grab_set()
 
@@ -500,14 +506,16 @@ class MusicManagerWindow:
         # 一時的に音楽リストをクリアして単一ファイルとして再生
         self.music_player.set_music_list([])  # メドレーリストをクリア
         self.music_player.set_music(self.music_list[index])  # 選択した曲を設定
-        
+
         # 音量を設定してから再生
         self.music_player.set_volume(self.preview_volume.get())
         self.music_player.play(self.music_list[index], delay_seconds=0)
 
         # ステータス更新
         music_path = self.music_list[index]
-        if music_path.startswith("http") and ("youtube" in music_path or "youtu.be" in music_path):
+        if music_path.startswith("http") and (
+            "youtube" in music_path or "youtu.be" in music_path
+        ):
             # YouTubeの場合はタイトルを表示
             filename = self.youtube_titles.get(music_path, "YouTube")
         else:
