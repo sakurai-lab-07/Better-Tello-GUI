@@ -44,7 +44,7 @@ src/
 ├── show_runner.py             # ドローンショー実行ロジック
 ├── music_player.py            # 音楽プレイヤーモジュール
 ├── project_manager.py         # プロジェクト保存・読み込み
-├── youtube_downloader.py      # YouTube音源ダウンロード
+├── youtube_downloader.py      # YouTube音源をキャッシュ
 ├── debug_parser.py            # デバッグ用パーサー
 └── gui/
     ├── __init__.py
