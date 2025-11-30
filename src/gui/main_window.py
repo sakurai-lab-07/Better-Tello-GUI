@@ -91,6 +91,7 @@ class TelloApp:
         self.music_list = []  # メドレー用の音楽リスト
         self.is_medley_mode = False  # メドレーモードかどうか
         self.youtube_titles = {}  # YouTubeタイトルのキャッシュ
+        self.bpm_data = {}  # BPM情報のキャッシュ
 
         # プロジェクト関連
         self.current_project_path = None  # 現在のプロジェクトパス
@@ -653,10 +654,15 @@ class TelloApp:
             self.music_list,
             self._on_music_list_saved,
             youtube_titles=self.youtube_titles,
+            bpm_data=self.bpm_data,
         )
 
     def _on_music_list_saved(
-        self, music_list: list, interval: float, youtube_titles: dict = None
+        self,
+        music_list: list,
+        interval: float,
+        youtube_titles: dict = None,
+        bpm_data: dict = None,
     ):
         """
         音楽管理ウィンドウから音楽リストが保存された時の処理
@@ -665,12 +671,17 @@ class TelloApp:
             music_list: 保存された音楽ファイルリスト
             interval: 曲間インターバル（秒）
             youtube_titles: YouTubeタイトルの辞書
+            bpm_data: BPM情報の辞書
         """
         self.music_list = music_list
 
         # YouTubeタイトルを更新
         if youtube_titles:
             self.youtube_titles.update(youtube_titles)
+
+        # BPMデータを更新
+        if bpm_data:
+            self.bpm_data.update(bpm_data)
 
         if music_list:
             self.is_medley_mode = True
@@ -768,6 +779,7 @@ class TelloApp:
             music_interval=self.music_player.get_interval(),
             drone_config=drone_config,
             youtube_titles=self.youtube_titles,
+            bpm_data=self.bpm_data,
         )
 
         if success:
@@ -827,6 +839,9 @@ class TelloApp:
 
         # YouTubeタイトルを復元
         self.youtube_titles = project_data.get("youtube_titles", {})
+
+        # BPMデータを復元
+        self.bpm_data = project_data.get("bpm_data", {})
 
         if music_paths:
             # 音楽リストを内部変数に保存

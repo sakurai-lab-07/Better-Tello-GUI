@@ -42,6 +42,7 @@ class ProjectManager:
         music_interval=0.0,
         drone_config=None,
         youtube_titles=None,
+        bpm_data=None,
     ):
         """
         プロジェクトを保存
@@ -56,6 +57,7 @@ class ProjectManager:
             music_interval: 曲間インターバル（秒）
             drone_config: ドローン設定情報
             youtube_titles: YouTube URLとタイトルの辞書
+            bpm_data: 音楽ファイルごとのBPM情報の辞書
 
         Returns:
             bool: 保存が成功したかどうか
@@ -96,21 +98,24 @@ class ProjectManager:
                         # タイトルがあれば保存
                         if youtube_titles and music_path in youtube_titles:
                             music_entry["title"] = youtube_titles[music_path]
+                        # BPM情報があれば保存
+                        if bpm_data and music_path in bpm_data:
+                            music_entry["bpm"] = bpm_data[music_path]
                         project_data["music"]["list"].append(music_entry)
                         self._log("INFO", f"YouTube URLを保存しました: {music_path}")
                     elif os.path.exists(music_path):
                         # ローカルファイルはBase64エンコードして埋め込み
                         with open(music_path, "rb") as f:
                             music_data = f.read()
-                            project_data["music"]["list"].append(
-                                {
-                                    "type": "file",
-                                    "filename": os.path.basename(music_path),
-                                    "data": base64.b64encode(music_data).decode(
-                                        "utf-8"
-                                    ),
-                                }
-                            )
+                            music_entry = {
+                                "type": "file",
+                                "filename": os.path.basename(music_path),
+                                "data": base64.b64encode(music_data).decode("utf-8"),
+                            }
+                            # BPM情報があれば保存
+                            if bpm_data and music_path in bpm_data:
+                                music_entry["bpm"] = bpm_data[music_path]
+                            project_data["music"]["list"].append(music_entry)
                         self._log("INFO", f"音楽ファイルを埋め込みました: {music_path}")
 
             # プロジェクトファイルを保存
@@ -164,6 +169,7 @@ class ProjectManager:
                 "music_interval": project_data.get("music", {}).get("interval", 0.0),
                 "drone_config": project_data.get("drone_config", {}),
                 "youtube_titles": {},
+                "bpm_data": {},
             }
 
             # 一時ディレクトリの作成
@@ -196,6 +202,10 @@ class ProjectManager:
                         title = music_item.get("title")
                         if title:
                             result["youtube_titles"][url] = title
+                        # BPMがあれば復元
+                        bpm = music_item.get("bpm")
+                        if bpm:
+                            result["bpm_data"][url] = bpm
                         self._log("INFO", f"YouTube URLを読み込みました: {url}")
                 else:
                     # ローカルファイルを復元
@@ -207,6 +217,10 @@ class ProjectManager:
                         with open(music_temp_path, "wb") as f:
                             f.write(music_data)
                         result["music_paths"].append(str(music_temp_path))
+                        # BPMがあれば復元
+                        bpm = music_item.get("bpm")
+                        if bpm:
+                            result["bpm_data"][str(music_temp_path)] = bpm
                         self._log(
                             "INFO", f"音楽ファイルを復元しました: {music_temp_path}"
                         )
