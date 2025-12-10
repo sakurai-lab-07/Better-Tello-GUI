@@ -169,11 +169,34 @@ class TelloApp:
         main_frame = ttk.Frame(self.master, padding=MAIN_PADDING)
         main_frame.pack(fill="both", expand=True)
         main_frame.grid_rowconfigure(1, weight=1)
-        main_frame.grid_columnconfigure(1, weight=1)
+        main_frame.grid_columnconfigure(0, weight=0, minsize=250)  # 左パネルの最小幅
+        main_frame.grid_columnconfigure(1, weight=1)  # 右パネルが伸縮
 
-        # 左カラム
-        left_frame = ttk.Frame(main_frame)
-        left_frame.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
+        # 左カラム（スクロール可能）
+        left_canvas = tk.Canvas(main_frame, bg=COLOR_BACKGROUND, highlightthickness=0)
+        left_canvas.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 15))
+        
+        left_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=left_canvas.yview)
+        left_scrollbar.grid(row=0, column=0, rowspan=2, sticky="nse", padx=(0, 15))
+        
+        left_frame = ttk.Frame(left_canvas)
+        left_canvas_frame = left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
+        
+        def configure_scroll_region(event):
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        
+        def configure_canvas_width(event):
+            canvas_width = event.width
+            left_canvas.itemconfig(left_canvas_frame, width=canvas_width)
+        
+        left_frame.bind("<Configure>", configure_scroll_region)
+        left_canvas.bind("<Configure>", configure_canvas_width)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        # マウスホイールでスクロール
+        def on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        left_canvas.bind_all("<MouseWheel>", on_mousewheel)
 
         self._create_drone_config_section(left_frame)
         self._create_project_selection_section(left_frame)
@@ -222,9 +245,10 @@ class TelloApp:
         file_frame.pack(fill="x", pady=(0, 15))
 
         self.sb3_path_label = ttk.Label(
-            file_frame, text="ファイルが選択されていません", wraplength=230
+            file_frame, text="ファイルが選択されていません"
         )
         self.sb3_path_label.pack(fill="x", pady=(0, 10))
+        self.sb3_path_label.bind('<Configure>', lambda e: self.sb3_path_label.config(wraplength=e.width-10))
 
         ttk.Button(
             file_frame, text="📂 Scratchファイルを開く", command=self.select_file
@@ -271,9 +295,10 @@ class TelloApp:
         audio_frame.pack(fill="x", pady=(0, 15))
 
         self.audio_path_label = ttk.Label(
-            audio_frame, text="音楽ファイルが選択されていません", wraplength=230
+            audio_frame, text="音楽ファイルが選択されていません"
         )
         self.audio_path_label.pack(fill="x", pady=(0, 10))
+        self.audio_path_label.bind('<Configure>', lambda e: self.audio_path_label.config(wraplength=e.width-10))
 
         # メドレー管理ボタン
         ttk.Button(
