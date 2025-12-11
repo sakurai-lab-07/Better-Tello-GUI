@@ -15,6 +15,7 @@ from show_runner import ShowRunner
 from music_player import MusicPlayer
 from project_manager import ProjectManager
 from youtube_downloader import YouTubeDownloader
+from core.network_manager import NetworkManager
 from config import (
     FONT_NORMAL,
     FONT_BOLD_LARGE,
@@ -175,27 +176,32 @@ class TelloApp:
         # 左カラム（スクロール可能）
         left_canvas = tk.Canvas(main_frame, bg=COLOR_BACKGROUND, highlightthickness=0)
         left_canvas.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 15))
-        
-        left_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=left_canvas.yview)
+
+        left_scrollbar = ttk.Scrollbar(
+            main_frame, orient="vertical", command=left_canvas.yview
+        )
         left_scrollbar.grid(row=0, column=0, rowspan=2, sticky="nse", padx=(0, 15))
-        
+
         left_frame = ttk.Frame(left_canvas)
-        left_canvas_frame = left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
-        
+        left_canvas_frame = left_canvas.create_window(
+            (0, 0), window=left_frame, anchor="nw"
+        )
+
         def configure_scroll_region(event):
             left_canvas.configure(scrollregion=left_canvas.bbox("all"))
-        
+
         def configure_canvas_width(event):
             canvas_width = event.width
             left_canvas.itemconfig(left_canvas_frame, width=canvas_width)
-        
+
         left_frame.bind("<Configure>", configure_scroll_region)
         left_canvas.bind("<Configure>", configure_canvas_width)
         left_canvas.configure(yscrollcommand=left_scrollbar.set)
-        
+
         # マウスホイールでスクロール
         def on_mousewheel(event):
-            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
         left_canvas.bind_all("<MouseWheel>", on_mousewheel)
 
         self._create_drone_config_section(left_frame)
@@ -232,8 +238,7 @@ class TelloApp:
         self.connect_btn = ttk.Button(
             ip_frame,
             text="📡 ドローンに接続",
-            command=self.connect_drones,
-            state="disabled",
+            command=self.auto_detect_and_connect,
         )
         self.connect_btn.pack(fill="x", pady=(5, 0))
 
@@ -244,11 +249,11 @@ class TelloApp:
         )
         file_frame.pack(fill="x", pady=(0, 15))
 
-        self.sb3_path_label = ttk.Label(
-            file_frame, text="ファイルが選択されていません"
-        )
+        self.sb3_path_label = ttk.Label(file_frame, text="ファイルが選択されていません")
         self.sb3_path_label.pack(fill="x", pady=(0, 10))
-        self.sb3_path_label.bind('<Configure>', lambda e: self.sb3_path_label.config(wraplength=e.width-10))
+        self.sb3_path_label.bind(
+            "<Configure>", lambda e: self.sb3_path_label.config(wraplength=e.width - 10)
+        )
 
         ttk.Button(
             file_frame, text="📂 Scratchファイルを開く", command=self.select_file
@@ -298,7 +303,10 @@ class TelloApp:
             audio_frame, text="音楽ファイルが選択されていません"
         )
         self.audio_path_label.pack(fill="x", pady=(0, 10))
-        self.audio_path_label.bind('<Configure>', lambda e: self.audio_path_label.config(wraplength=e.width-10))
+        self.audio_path_label.bind(
+            "<Configure>",
+            lambda e: self.audio_path_label.config(wraplength=e.width - 10),
+        )
 
         # メドレー管理ボタン
         ttk.Button(
@@ -511,6 +519,107 @@ class TelloApp:
             messagebox.showinfo("成功", "IPアドレスを保存しました。")
         except Exception as e:
             messagebox.showerror("エラー", f"設定の保存に失敗しました: {e}")
+
+    def auto_detect_and_connect(self):
+        """Wi-Fiドングルに接続されたTelloドローンを自動検出して接続"""
+        self.log(
+            {
+                "level": LOG_LEVEL_INFO,
+                "message": "Telloドローンの自動検出と接続を開始しています...",
+            }
+        )
+
+        # スレッドで実行（UIがブロックされないように）
+        thread = threading.Thread(target=self._auto_detect_and_connect_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _auto_detect_and_connect_thread(self):
+        """自動検出と接続処理を実行するスレッド"""
+        try:
+            network_manager = NetworkManager()
+
+            # 接続されているTelloを取得
+            connected_tellos = network_manager.get_connected_tellos()
+
+            if not connected_tellos:
+                self.log(
+                    {
+                        "level": LOG_LEVEL_WARNING,
+                        "message": "接続されているTelloドローンが見つかりません。周囲をスキャンして接続を試みています...",
+                    }
+                )
+
+                # 周囲のTelloネットワークをスキャンして接続を試みる
+                self.log(
+                    {
+                        "level": LOG_LEVEL_INFO,
+                        "message": "周囲のTelloネットワークをスキャン中...",
+                    }
+                )
+                network_manager.connect_all_tellos(log_callback=self._log_callback)
+
+                # 再度接続状態を確認
+                import time
+
+                time.sleep(5)  # 接続確立を待つ
+                connected_tellos = network_manager.get_connected_tellos()
+
+            if not connected_tellos:
+                self.log(
+                    {
+                        "level": LOG_LEVEL_ERROR,
+                        "message": "Telloドローンへの接続に失敗しました。Telloの電源と距離を確認してください。",
+                    }
+                )
+                return
+
+            # 既存のエントリーをクリア
+            while self.drone_entry_widgets:
+                self.remove_drone_entry()
+
+            # 検出したIPアドレスをTello_A, Tello_Bなどの順に追加
+            for idx, tello_info in enumerate(connected_tellos):
+                drone_name = f"Tello_{chr(65 + idx)}"  # A, B, C, ...
+                ip = tello_info["ip"]
+                self.add_drone_entry(name=drone_name, ip=ip)
+
+                self.log(
+                    {
+                        "level": LOG_LEVEL_INFO,
+                        "message": f"検出: {drone_name} -> {ip} ({tello_info['ssid']})",
+                    }
+                )
+
+            self.log(
+                {
+                    "level": LOG_LEVEL_SUCCESS,
+                    "message": f"{len(connected_tellos)}台のTelloドローンを検出しました。",
+                }
+            )
+
+            # 自動的に設定を保存
+            self.save_config()
+
+            # ドローンへの接続処理を実行
+            self.connect_drones()
+
+        except Exception as e:
+            self.log(
+                {
+                    "level": LOG_LEVEL_ERROR,
+                    "message": f"接続エラー: {e}",
+                }
+            )
+
+    def _log_callback(self, message):
+        """NetworkManagerからのログコールバック"""
+        self.log(
+            {
+                "level": LOG_LEVEL_INFO,
+                "message": message,
+            }
+        )
 
     def select_file(self):
         """Scratchプロジェクトファイルを選択"""
