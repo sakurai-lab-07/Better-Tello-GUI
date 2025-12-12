@@ -24,6 +24,10 @@ class ShowRunner:
         self.total_time = total_time
         self.controllers = controllers if controllers is not None else {}
         self.audio_path = audio_path  # ★★★★★ 音声ファイルのパスを受け取る ★★★★★
+        # ★★★ スプライト状態管理 ★★★
+        self.sprite_positions = {}  # {sprite_name: (x, y, z)}
+        self.stage_size = {"width": 480, "height": 360}  # ステージサイズ
+        self.origin_offsets = {}  # {sprite_name: (ox, oy) or None}
 
     def log(self, log_item):
         self.log_queue.put(log_item)
@@ -154,6 +158,8 @@ class ShowRunner:
                             break
                         target, command = cmd["target"], cmd["command"]
                         if target in self.controllers:
+                            # ★★★ スプライト位置情報を更新 ★★★
+                            self._update_sprite_position(target, command)
                             threads.append(
                                 threading.Thread(
                                     target=self.controllers[target].send_command,
@@ -260,3 +266,56 @@ class ShowRunner:
             c.close()
         self.log({"level": "INFO", "message": "--- 全ての接続を閉じました。 ---"})
         self.log({"type": "show_finished"})
+
+    def _update_sprite_position(self, sprite_name, command):
+        """スプライトの位置情報をコマンドに基づいて更新"""
+        if sprite_name not in self.sprite_positions:
+            self.sprite_positions[sprite_name] = (0, 0, 80)  # (x, y, z)
+
+        x, y, z = self.sprite_positions[sprite_name]
+        cmd_parts = command.split()
+
+        if not cmd_parts:
+            return
+
+        action = cmd_parts[0]
+
+        # 移動コマンドの処理
+        if action == "forward" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                y += distance
+            except (ValueError, IndexError):
+                pass
+        elif action == "back" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                y -= distance
+            except (ValueError, IndexError):
+                pass
+        elif action == "left" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                x -= distance
+            except (ValueError, IndexError):
+                pass
+        elif action == "right" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                x += distance
+            except (ValueError, IndexError):
+                pass
+        elif action == "up" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                z += distance
+            except (ValueError, IndexError):
+                pass
+        elif action == "down" and len(cmd_parts) > 1:
+            try:
+                distance = int(cmd_parts[1])
+                z -= distance
+            except (ValueError, IndexError):
+                pass
+
+        self.sprite_positions[sprite_name] = (x, y, z)

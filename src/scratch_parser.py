@@ -17,6 +17,10 @@ class ScratchProjectParser:
         self.log_queue = log_queue
         self.project_data = self._load_project_data()
         self.has_any_valid_action = False
+        # ★★★ ステージとスプライトの状態管理 ★★★
+        self.stage_width = 480
+        self.stage_height = 360
+        self.origin_offset = {}  # スプライト毎の原点オフセット {sprite_name: (x, y)}
 
     def log(self, message, level="INFO"):
         self.log_queue.put({"level": level, "message": message})
@@ -33,7 +37,15 @@ class ScratchProjectParser:
             )
             return None
 
-    def _get_input_value(self, block_input, blocks, variable_state, custom_block_args):
+    def _get_input_value(
+        self,
+        block_input,
+        blocks,
+        variable_state,
+        custom_block_args,
+        sprite_name=None,
+        current_pos=None,
+    ):
         if not block_input:
             return 0.0
         input_type, input_value = block_input[0], block_input[1]
@@ -59,6 +71,32 @@ class ScratchProjectParser:
                         return float(ref_block["fields"]["NUM"][0])
                     except (ValueError, TypeError):
                         return 0.0
+
+                # ★★★ レポーター型ブロック処理 ★★★
+                elif opcode == "preview_getX" and sprite_name and current_pos:
+                    return current_pos[0]
+                elif opcode == "preview_getY" and sprite_name and current_pos:
+                    return current_pos[1]
+                elif opcode == "preview_getStageWidth":
+                    return self.stage_width
+                elif opcode == "preview_getStageHeight":
+                    return self.stage_height
+                elif opcode == "preview_getLocalX" and sprite_name and current_pos:
+                    if (
+                        sprite_name in self.origin_offset
+                        and self.origin_offset[sprite_name]
+                    ):
+                        origin_x, _ = self.origin_offset[sprite_name]
+                        return current_pos[0] - origin_x
+                    return current_pos[0]
+                elif opcode == "preview_getLocalY" and sprite_name and current_pos:
+                    if (
+                        sprite_name in self.origin_offset
+                        and self.origin_offset[sprite_name]
+                    ):
+                        _, origin_y = self.origin_offset[sprite_name]
+                        return current_pos[1] - origin_y
+                    return current_pos[1]
 
         elif input_type == 3 and isinstance(input_value, list) and input_value[0] == 12:
             var_id = input_value[2]
@@ -115,6 +153,10 @@ class ScratchProjectParser:
         pos_x, pos_y, pos_z = 0, 0, self.INITIAL_HOVER_HEIGHT_CM
         variable_state = initial_variable_state.copy()
 
+        # ★★★ スプライト毎の状態管理 ★★★
+        if sprite_name not in self.origin_offset:
+            self.origin_offset[sprite_name] = None
+
         def _traverse_blocks(block_id, current_pos, current_vars, custom_block_args={}):
             px, py, pz = current_pos
             local_action_sequence = []
@@ -167,6 +209,258 @@ class ScratchProjectParser:
                             custom_block_args=new_args,
                         )
                         local_action_sequence.extend(nested_actions)
+
+                # ★★★ 新規ブロック: プレビュー拡張機能 ★★★
+                elif opcode == "preview_setStageSize":
+                    width = int(
+                        self._get_input_value(
+                            inputs.get("WIDTH"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                    )
+                    height = int(
+                        self._get_input_value(
+                            inputs.get("HEIGHT"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                    )
+                    self.stage_width = width
+                    self.stage_height = height
+                    self.log(f"ステージサイズ設定: {width}x{height}")
+
+                elif opcode == "preview_setOriginHere":
+                    self.origin_offset[sprite_name] = (px, py)
+                    self.log(f"[{sprite_name}] 原点を ({px}, {py}) に設定")
+
+                elif opcode == "preview_setOriginXY":
+                    origin_x = self._get_input_value(
+                        inputs.get("X"), all_blocks, current_vars, custom_block_args
+                    )
+                    origin_y = self._get_input_value(
+                        inputs.get("Y"), all_blocks, current_vars, custom_block_args
+                    )
+                    self.origin_offset[sprite_name] = (origin_x, origin_y)
+                    self.log(f"[{sprite_name}] 原点を ({origin_x}, {origin_y}) に設定")
+
+                elif opcode == "preview_clearOrigin":
+                    self.origin_offset[sprite_name] = None
+                    self.log(f"[{sprite_name}] 原点をクリア")
+
+                elif opcode == "preview_turnRight":
+                    degrees = self._get_input_value(
+                        inputs.get("DEGREES"),
+                        all_blocks,
+                        current_vars,
+                        custom_block_args,
+                    )
+                    cmd_type = "cw"
+                    cmd = {
+                        "target": sprite_name,
+                        "command": f"{cmd_type} {int(degrees)}",
+                    }
+                    duration = 2.0 + (abs(degrees) / 90.0) * 1.5
+                    local_action_sequence.append(
+                        {
+                            "duration": duration,
+                            "commands": [cmd],
+                            "is_wait": False,
+                            "sprite_name": sprite_name,
+                        }
+                    )
+
+                elif opcode == "preview_turnLeft":
+                    degrees = self._get_input_value(
+                        inputs.get("DEGREES"),
+                        all_blocks,
+                        current_vars,
+                        custom_block_args,
+                    )
+                    cmd_type = "ccw"
+                    cmd = {
+                        "target": sprite_name,
+                        "command": f"{cmd_type} {int(degrees)}",
+                    }
+                    duration = 2.0 + (abs(degrees) / 90.0) * 1.5
+                    local_action_sequence.append(
+                        {
+                            "duration": duration,
+                            "commands": [cmd],
+                            "is_wait": False,
+                            "sprite_name": sprite_name,
+                        }
+                    )
+
+                elif opcode == "preview_moveBy":
+                    move_x = int(
+                        self._get_input_value(
+                            inputs.get("DX"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+                    move_y = int(
+                        self._get_input_value(
+                            inputs.get("DY"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+
+                    if abs(move_x) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_x, "h")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        px += move_x / self.SCRATCH_TO_CM_RATE
+
+                    if abs(move_y) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_y, "v")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        py += move_y / self.SCRATCH_TO_CM_RATE
+
+                elif opcode == "preview_moveXBy":
+                    move_x = int(
+                        self._get_input_value(
+                            inputs.get("DX"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+
+                    if abs(move_x) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_x, "h")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        px += move_x / self.SCRATCH_TO_CM_RATE
+
+                elif opcode == "preview_moveYBy":
+                    move_y = int(
+                        self._get_input_value(
+                            inputs.get("DY"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+
+                    if abs(move_y) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_y, "v")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        py += move_y / self.SCRATCH_TO_CM_RATE
+
+                elif opcode == "preview_moveToLocal":
+                    local_x = self._get_input_value(
+                        inputs.get("LX"), all_blocks, current_vars, custom_block_args
+                    )
+                    local_y = self._get_input_value(
+                        inputs.get("LY"), all_blocks, current_vars, custom_block_args
+                    )
+
+                    if self.origin_offset[sprite_name]:
+                        origin_x, origin_y = self.origin_offset[sprite_name]
+                        target_x = origin_x + local_x
+                        target_y = origin_y + local_y
+
+                        move_x = int((target_x - px) * self.SCRATCH_TO_CM_RATE)
+                        move_y = int((target_y - py) * self.SCRATCH_TO_CM_RATE)
+
+                        if abs(move_x) >= self.MIN_TELLO_MOVE:
+                            cmd, dur, _ = self._pos_to_command(sprite_name, move_x, "h")
+                            local_action_sequence.append(
+                                {
+                                    "duration": dur,
+                                    "commands": [cmd],
+                                    "is_wait": False,
+                                    "sprite_name": sprite_name,
+                                }
+                            )
+                            px = target_x
+
+                        if abs(move_y) >= self.MIN_TELLO_MOVE:
+                            cmd, dur, _ = self._pos_to_command(sprite_name, move_y, "v")
+                            local_action_sequence.append(
+                                {
+                                    "duration": dur,
+                                    "commands": [cmd],
+                                    "is_wait": False,
+                                    "sprite_name": sprite_name,
+                                }
+                            )
+                            py = target_y
+
+                elif opcode == "preview_changeSizeBy":
+                    change = self._get_input_value(
+                        inputs.get("CHANGE"),
+                        all_blocks,
+                        current_vars,
+                        custom_block_args,
+                    )
+                    new_z = pz + change
+                    dz = int(new_z - pz)
+                    if abs(dz) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._height_to_command(sprite_name, dz)
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                    pz = new_z
+
+                elif opcode == "preview_setSizeTo":
+                    new_z = self._get_input_value(
+                        inputs.get("SIZE"), all_blocks, current_vars, custom_block_args
+                    )
+                    dz = int(new_z - pz)
+                    if abs(dz) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._height_to_command(sprite_name, dz)
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                    pz = new_z
 
                 elif opcode in ("motion_turnright", "motion_turnleft"):
                     degrees = self._get_input_value(
