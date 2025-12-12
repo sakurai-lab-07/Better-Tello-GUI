@@ -6,7 +6,7 @@ import math
 class ScratchProjectParser:
     def __init__(self, sb3_path, log_queue):
         self.TAKEOFF_DURATION = 8.0
-        self.MIN_TELLO_MOVE = 20
+        self.MIN_TELLO_MOVE = 1  # ★★★ ドローン最小移動距離
         self.SCRATCH_TO_CM_RATE = 1
         self.INITIAL_HOVER_HEIGHT_CM = 80
         self.TELLO_HORIZONTAL_SPEED_CMS = 50.0
@@ -17,9 +17,7 @@ class ScratchProjectParser:
         self.log_queue = log_queue
         self.project_data = self._load_project_data()
         self.has_any_valid_action = False
-        # ★★★ ステージとスプライトの状態管理 ★★★
-        self.stage_width = 480
-        self.stage_height = 360
+        # ★★★ スプライト状態管理 ★★★
         self.origin_offset = {}  # スプライト毎の原点オフセット {sprite_name: (x, y)}
 
     def log(self, message, level="INFO"):
@@ -77,10 +75,6 @@ class ScratchProjectParser:
                     return current_pos[0]
                 elif opcode == "preview_getY" and sprite_name and current_pos:
                     return current_pos[1]
-                elif opcode == "preview_getStageWidth":
-                    return self.stage_width
-                elif opcode == "preview_getStageHeight":
-                    return self.stage_height
                 elif opcode == "preview_getLocalX" and sprite_name and current_pos:
                     if (
                         sprite_name in self.origin_offset
@@ -210,31 +204,98 @@ class ScratchProjectParser:
                         )
                         local_action_sequence.extend(nested_actions)
 
-                # ★★★ 新規ブロック: プレビュー拡張機能 ★★★
+                # ★★★ 新規ブロック: ムーブスプライト拡張機能 ★★★
+                elif opcode == "moveSpriteExt_moveXBy":
+                    move_x = int(
+                        self._get_input_value(
+                            inputs.get("DX"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+                    self.log(f"  moveSpriteExt_moveXBy: move_x={move_x}")
+
+                    if abs(move_x) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_x, "v")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        px += move_x / self.SCRATCH_TO_CM_RATE
+
+                elif opcode == "moveSpriteExt_moveYBy":
+                    move_y = int(
+                        self._get_input_value(
+                            inputs.get("DY"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+                    self.log(f"  moveSpriteExt_moveYBy: move_y={move_y}")
+
+                    if abs(move_y) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._pos_to_command(sprite_name, move_y, "h")
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                        py += move_y / self.SCRATCH_TO_CM_RATE
+
+                elif opcode == "moveSpriteExt_changeSizeBy":
+                    change = int(
+                        self._get_input_value(
+                            inputs.get("DELTA"),
+                            all_blocks,
+                            current_vars,
+                            custom_block_args,
+                        )
+                        * self.SCRATCH_TO_CM_RATE
+                    )
+                    dz = change
+                    self.log(f"  moveSpriteExt_changeSizeBy: dz={dz}")
+                    if abs(dz) >= self.MIN_TELLO_MOVE:
+                        cmd, dur, _ = self._height_to_command(sprite_name, dz)
+                        local_action_sequence.append(
+                            {
+                                "duration": dur,
+                                "commands": [cmd],
+                                "is_wait": False,
+                                "sprite_name": sprite_name,
+                            }
+                        )
+                    pz += dz / self.SCRATCH_TO_CM_RATE
+
                 elif opcode == "preview_setStageSize":
-                    width = int(
-                        self._get_input_value(
-                            inputs.get("WIDTH"),
-                            all_blocks,
-                            current_vars,
-                            custom_block_args,
-                        )
-                    )
-                    height = int(
-                        self._get_input_value(
-                            inputs.get("HEIGHT"),
-                            all_blocks,
-                            current_vars,
-                            custom_block_args,
-                        )
-                    )
-                    self.stage_width = width
-                    self.stage_height = height
-                    self.log(f"ステージサイズ設定: {width}x{height}")
+                    # スルー（ステージサイズはシステム内では不要）
+                    pass
+                    current_block_id = block.get("next")
+                    continue
 
                 elif opcode == "preview_setOriginHere":
                     self.origin_offset[sprite_name] = (px, py)
                     self.log(f"[{sprite_name}] 原点を ({px}, {py}) に設定")
+                    # ★★★ タイムラインに表示 ★★★
+                    local_action_sequence.append(
+                        {
+                            "duration": 0.5,
+                            "commands": [],
+                            "is_wait": False,
+                            "sprite_name": sprite_name,
+                            "description": f"原点設定: ({px}, {py})",
+                        }
+                    )
 
                 elif opcode == "preview_setOriginXY":
                     origin_x = self._get_input_value(
@@ -245,10 +306,30 @@ class ScratchProjectParser:
                     )
                     self.origin_offset[sprite_name] = (origin_x, origin_y)
                     self.log(f"[{sprite_name}] 原点を ({origin_x}, {origin_y}) に設定")
+                    # ★★★ タイムラインに表示 ★★★
+                    local_action_sequence.append(
+                        {
+                            "duration": 0.5,
+                            "commands": [],
+                            "is_wait": False,
+                            "sprite_name": sprite_name,
+                            "description": f"原点設定: ({origin_x}, {origin_y})",
+                        }
+                    )
 
                 elif opcode == "preview_clearOrigin":
                     self.origin_offset[sprite_name] = None
                     self.log(f"[{sprite_name}] 原点をクリア")
+                    # ★★★ タイムラインに表示 ★★★
+                    local_action_sequence.append(
+                        {
+                            "duration": 0.5,
+                            "commands": [],
+                            "is_wait": False,
+                            "sprite_name": sprite_name,
+                            "description": "原点クリア",
+                        }
+                    )
 
                 elif opcode == "preview_turnRight":
                     degrees = self._get_input_value(
@@ -338,52 +419,6 @@ class ScratchProjectParser:
                         )
                         py += move_y / self.SCRATCH_TO_CM_RATE
 
-                elif opcode == "preview_moveXBy":
-                    move_x = int(
-                        self._get_input_value(
-                            inputs.get("DX"),
-                            all_blocks,
-                            current_vars,
-                            custom_block_args,
-                        )
-                        * self.SCRATCH_TO_CM_RATE
-                    )
-
-                    if abs(move_x) >= self.MIN_TELLO_MOVE:
-                        cmd, dur, _ = self._pos_to_command(sprite_name, move_x, "h")
-                        local_action_sequence.append(
-                            {
-                                "duration": dur,
-                                "commands": [cmd],
-                                "is_wait": False,
-                                "sprite_name": sprite_name,
-                            }
-                        )
-                        px += move_x / self.SCRATCH_TO_CM_RATE
-
-                elif opcode == "preview_moveYBy":
-                    move_y = int(
-                        self._get_input_value(
-                            inputs.get("DY"),
-                            all_blocks,
-                            current_vars,
-                            custom_block_args,
-                        )
-                        * self.SCRATCH_TO_CM_RATE
-                    )
-
-                    if abs(move_y) >= self.MIN_TELLO_MOVE:
-                        cmd, dur, _ = self._pos_to_command(sprite_name, move_y, "v")
-                        local_action_sequence.append(
-                            {
-                                "duration": dur,
-                                "commands": [cmd],
-                                "is_wait": False,
-                                "sprite_name": sprite_name,
-                            }
-                        )
-                        py += move_y / self.SCRATCH_TO_CM_RATE
-
                 elif opcode == "preview_moveToLocal":
                     local_x = self._get_input_value(
                         inputs.get("LX"), all_blocks, current_vars, custom_block_args
@@ -423,27 +458,6 @@ class ScratchProjectParser:
                                 }
                             )
                             py = target_y
-
-                elif opcode == "preview_changeSizeBy":
-                    change = self._get_input_value(
-                        inputs.get("CHANGE"),
-                        all_blocks,
-                        current_vars,
-                        custom_block_args,
-                    )
-                    new_z = pz + change
-                    dz = int(new_z - pz)
-                    if abs(dz) >= self.MIN_TELLO_MOVE:
-                        cmd, dur, _ = self._height_to_command(sprite_name, dz)
-                        local_action_sequence.append(
-                            {
-                                "duration": dur,
-                                "commands": [cmd],
-                                "is_wait": False,
-                                "sprite_name": sprite_name,
-                            }
-                        )
-                    pz = new_z
 
                 elif opcode == "preview_setSizeTo":
                     new_z = self._get_input_value(
@@ -703,6 +717,16 @@ class ScratchProjectParser:
                             "type": "WAIT",
                             "target": action["sprite_name"],
                             "text": f"{action['duration']:.2f}秒 待機",
+                        }
+                    )
+                # ★★★ 新規: description フィールドを処理（設定系ブロック） ★★★
+                elif action.get("description"):
+                    final_event_list.append(
+                        {
+                            "time": master_time,
+                            "type": "INFO",
+                            "target": action["sprite_name"],
+                            "text": action["description"],
                         }
                     )
                 for cmd in action.get("commands", []):
