@@ -1,6 +1,6 @@
 """
 Telloドローン制御モジュール
-ステータス受信機能付き
+ステータス受信機能付き・ポート競合対策版
 """
 
 import socket
@@ -39,15 +39,21 @@ class TelloController:
 
         # --- 1. コマンド送信用ソケット (Port: 9000+offset) ---
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # ★ ポート再利用設定を追加
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(self.pc_address)
 
         # --- 2. ステータス受信用ソケット (Port: 8890) ---
         # Telloはステータス情報を常にポート8890に送ってくる
         self.state_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # ★ ポート再利用設定を追加（これがWinError 10048対策）
+        self.state_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
         # 複数のインターフェースがある場合、それぞれのIPの8890にバインドする
         try:
             self.state_socket.bind((self.pc_ip, 8890))
         except Exception as e:
+            # 万が一失敗してもメイン機能（コマンド送信）は動くようにログ出力にとどめる
             self.log({"level": "ERROR", "message": f"[{self.name}] State Bind Error: {e}"})
 
         # 状態保持用辞書
