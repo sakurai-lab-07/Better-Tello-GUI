@@ -1,34 +1,11 @@
 """
 タイムラインビューアーウィンドウ
-
-動画編集ソフトのようなタイムライン表示で、
-音源とドローンの動きを視覚的に表示します。
+動画編集ソフト風のタイムラインUIで音楽とドローンの動きを表示
 """
 
 import tkinter as tk
-from tkinter import ttk, Canvas
-from typing import List, Dict, Optional, Tuple
-import math
-import threading
+from tkinter import ttk, font as tkfont
 import os
-import hashlib
-import tempfile
-from pathlib import Path
-
-# 波形表示用のオプショナルインポート
-try:
-    import numpy as np
-
-    NUMPY_AVAILABLE = True
-except ImportError:
-    NUMPY_AVAILABLE = False
-
-try:
-    from pydub import AudioSegment
-
-    PYDUB_AVAILABLE = True
-except ImportError:
-    PYDUB_AVAILABLE = False
 
 from config import (
     COLOR_BACKGROUND,
@@ -37,85 +14,63 @@ from config import (
     COLOR_WARNING,
     COLOR_ERROR,
     COLOR_HIGHLIGHT,
-    COLOR_TEXT,
     FONT_NORMAL,
+    FONT_BOLD_LARGE,
     FONT_HEADER,
 )
+
+# pygame関連
+try:
+    import pygame.mixer
+
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
 
 
 class TimelineViewerWindow:
     """タイムラインビューアーウィンドウクラス"""
 
-    # 波形キャッシュ（クラス変数）
-    _waveform_cache: Dict[str, Tuple[List[float], float]] = {}
-    _cache_dir = Path(tempfile.gettempdir()) / "tello_waveform_cache"
-
-    def __init__(
-        self,
-        parent,
-        schedule: List[Dict],
-        total_time: float,
-        music_list: List[str],
-        music_player,
-    ):
+    def __init__(self, parent, music_list, schedule, total_time, interval_seconds=0.0):
         """
         タイムラインビューアーの初期化
 
         Args:
             parent: 親ウィンドウ
+            music_list: 音楽ファイルのリスト
             schedule: ドローンのスケジュール
-            total_time: 総実行時間（秒）
-            music_list: 音楽ファイルリスト
-            music_player: MusicPlayerインスタンス
+            total_time: ショーの総実行時間
+            interval_seconds: 曲間インターバル
         """
         self.parent = parent
+        self.music_list = music_list
         self.schedule = schedule
         self.total_time = total_time
-        self.music_list = music_list
-        self.music_player = music_player
-        self.interval = music_player.get_interval()
-
-        # タイムラインの設定
-        self.pixels_per_second = 50  # 1秒あたりのピクセル数
-        self.track_height = 60  # トラックの高さ（波形表示のため増加）
-        self.header_width = 150  # ヘッダー部分の幅
-        self.timeline_padding = 20  # タイムラインの余白
-
-        # 波形データのキャッシュ（インスタンス変数）
-        self.waveform_data: Dict[str, Tuple[List[float], float]] = {}
-        self.waveform_loading: Dict[str, bool] = {}
-
-        # 音楽ファイルの長さキャッシュ
-        self.music_durations: Dict[str, float] = {}
-
-        # YouTubeタイトルのキャッシュ
-        self.youtube_titles: Dict[str, str] = {}
-
-        # 再描画デバウンス用
-        self._redraw_scheduled = False
-        self._redraw_delay = 100  # ms
-
-        # ドローンごとのスケジュールを抽出
-        self.drone_schedules = self._organize_by_drone()
+        self.interval_seconds = interval_seconds
 
         # ウィンドウの作成
         self.window = tk.Toplevel(parent)
-        self.window.title("📊 タイムラインビューアー")
-        self.window.geometry("1200x700")
+        self.window.title("タイムラインビューアー")
+        self.window.geometry("1000x600")
         self.window.minsize(800, 500)
         self.window.configure(bg=COLOR_BACKGROUND)
 
-        # モーダルウィンドウとして設定
+        # モーダルにしない（並行して操作可能）
         self.window.transient(parent)
 
+        # タイムライン設定
+        self.timeline_start_x = 150  # タイムライン開始位置（左マージン）
+        self.timeline_width = 800  # タイムライン幅
+        self.row_height = 40  # 各行の高さ
+        self.header_height = 60  # ヘッダーの高さ
+        self.pixels_per_second = 50  # 1秒あたりのピクセル数（初期値）
+
+        # スクロール位置
+        self.scroll_x = 0
+
+        # UI構築
         self._create_widgets()
         self._draw_timeline()
-
-        # 波形データを非同期で読み込み
-        self._load_all_waveforms_async()
-
-        # YouTubeタイトルを非同期で取得
-        self._load_youtube_titles_async()
 
         # ウィンドウを中央に配置
         self.window.update_idletasks()
@@ -123,240 +78,48 @@ class TimelineViewerWindow:
         y = (self.window.winfo_screenheight() // 2) - (self.window.winfo_height() // 2)
         self.window.geometry(f"+{x}+{y}")
 
-    def _schedule_redraw(self):
-        """再描画をスケジュール（デバウンス）"""
-        if not self._redraw_scheduled:
-            self._redraw_scheduled = True
-            self.window.after(self._redraw_delay, self._do_redraw)
-
-    def _do_redraw(self):
-        """実際の再描画を実行"""
-        self._redraw_scheduled = False
-        self._draw_timeline()
-
-    def _organize_by_drone(self) -> Dict[str, List[Dict]]:
-        """スケジュールをドローンごとに整理（ALLとTAKEOFFは除外）"""
-        drone_schedules = {}
-
-        if not self.schedule:
-            return drone_schedules
-
-        for event in self.schedule:
-            target = event.get("target", "Unknown")
-            event_type = event.get("type", "")
-
-            # ALLターゲットとTAKEOFFイベントは離陸トラックで表示するので除外
-            if target == "ALL" or event_type == "TAKEOFF":
-                continue
-
-            if target not in drone_schedules:
-                drone_schedules[target] = []
-            drone_schedules[target].append(event)
-
-        return drone_schedules
-
-    def _get_cache_key(self, music_path: str) -> str:
-        """音楽ファイルのキャッシュキーを生成"""
-        # 実際のファイルパスを取得
-        actual_path = self._resolve_music_path(music_path)
-        if not actual_path:
-            return hashlib.md5(music_path.encode()).hexdigest()
-
-        # ファイルパスと更新日時からハッシュを生成
-        try:
-            mtime = os.path.getmtime(actual_path)
-            key_str = f"{actual_path}:{mtime}"
-            return hashlib.md5(key_str.encode()).hexdigest()
-        except:
-            return hashlib.md5(actual_path.encode()).hexdigest()
-
-    def _is_youtube_url(self, url: str) -> bool:
-        """YouTube URLかどうかを判定"""
-        if not url:
-            return False
-        return url.startswith(("http://", "https://")) and (
-            "youtube.com" in url or "youtu.be" in url
-        )
-
-    def _resolve_music_path(self, music_path: str) -> Optional[str]:
-        """
-        音楽パスを実際のファイルパスに解決
-        YouTube URLの場合はキャッシュファイルのパスを返す
-
-        Args:
-            music_path: 音楽ファイルのパスまたはYouTube URL
-
-        Returns:
-            実際のファイルパス、存在しない場合はNone
-        """
-        if not music_path:
-            return None
-
-        # YouTube URLの場合
-        if self._is_youtube_url(music_path):
-            # MusicPlayerのキャッシュディレクトリを使用
-            if hasattr(self.music_player, "temp_dir"):
-                url_hash = hashlib.md5(music_path.encode()).hexdigest()
-                cache_file = self.music_player.temp_dir / f"{url_hash}.mp3"
-                if cache_file.exists():
-                    return str(cache_file)
-            return None
-
-        # 通常のファイルパス
-        if os.path.exists(music_path):
-            return music_path
-
-        return None
-
-    def _load_all_waveforms_async(self):
-        """すべての音楽ファイルの波形を非同期で読み込み"""
-        if not NUMPY_AVAILABLE or not PYDUB_AVAILABLE:
-            return
-
-        for music_path in self.music_list:
-            # 実際のファイルパスを解決
-            actual_path = self._resolve_music_path(music_path)
-            if actual_path:
-                cache_key = self._get_cache_key(music_path)
-
-                # 既にキャッシュにある場合はスキップ
-                if cache_key in TimelineViewerWindow._waveform_cache:
-                    self.waveform_data[music_path] = (
-                        TimelineViewerWindow._waveform_cache[cache_key]
-                    )
-                    continue
-
-                # 読み込み中フラグ
-                if music_path not in self.waveform_loading:
-                    self.waveform_loading[music_path] = True
-                    thread = threading.Thread(
-                        target=self._load_waveform_data,
-                        args=(music_path, actual_path),
-                        daemon=True,
-                    )
-                    thread.start()
-
-    def _load_youtube_titles_async(self):
-        """YouTubeタイトルを非同期で取得"""
-        for music_path in self.music_list:
-            if (
-                self._is_youtube_url(music_path)
-                and music_path not in self.youtube_titles
-            ):
-                thread = threading.Thread(
-                    target=self._load_youtube_title, args=(music_path,), daemon=True
-                )
-                thread.start()
-
-    def _load_youtube_title(self, url: str):
-        """
-        YouTubeタイトルを取得
-
-        Args:
-            url: YouTube URL
-        """
-        try:
-            import yt_dlp
-
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                title = info.get("title", "Unknown")
-                self.youtube_titles[url] = title
-                # UIを更新（デバウンス付き）
-                self.window.after(0, self._schedule_redraw)
-        except Exception as e:
-            print(f"YouTubeタイトル取得エラー: {url}: {e}")
-            self.youtube_titles[url] = "YouTube"
-
-    def _load_waveform_data(self, music_path: str, actual_path: str):
-        """
-        音楽ファイルから波形データを読み込み（軽量化版）
-
-        Args:
-            music_path: 元の音楽パス（YouTube URLまたはファイルパス）
-            actual_path: 実際のファイルパス
-        """
-        try:
-            # 音声ファイルを読み込み
-            audio = AudioSegment.from_file(actual_path)
-
-            # 音楽の長さ（秒）
-            duration = len(audio) / 1000.0
-            self.music_durations[music_path] = duration
-
-            # モノラルに変換（ステレオの場合）
-            if audio.channels == 2:
-                audio = audio.set_channels(1)
-
-            # サンプルレートを下げて軽量化（8000Hzで十分）
-            audio = audio.set_frame_rate(8000)
-
-            # 生のサンプルデータを取得
-            samples = np.array(audio.get_array_of_samples())
-
-            # 波形データをさらにダウンサンプリング
-            # 1秒あたり30ポイント程度に削減（表示用に十分、軽量化）
-            target_points = int(duration * 30)
-            if len(samples) > target_points:
-                # チャンクごとに最大値を取得（エンベロープ抽出）
-                chunk_size = max(1, len(samples) // target_points)
-                waveform = []
-                for i in range(0, len(samples), chunk_size):
-                    chunk = samples[i : i + chunk_size]
-                    if len(chunk) > 0:
-                        # 絶対値の最大値を取得
-                        waveform.append(float(np.max(np.abs(chunk))))
-            else:
-                waveform = [float(abs(s)) for s in samples]
-
-            # 正規化（0.0 ～ 1.0）
-            max_val = max(waveform) if waveform else 1
-            if max_val > 0:
-                waveform = [v / max_val for v in waveform]
-
-            # キャッシュに保存
-            cache_key = self._get_cache_key(music_path)
-            TimelineViewerWindow._waveform_cache[cache_key] = (waveform, duration)
-            self.waveform_data[music_path] = (waveform, duration)
-
-            # UIを更新（メインスレッドでデバウンス付きで実行）
-            self.window.after(0, self._schedule_redraw)
-
-        except Exception as e:
-            print(f"波形読み込みエラー: {music_path}: {e}")
-        finally:
-            self.waveform_loading[music_path] = False
-
     def _create_widgets(self):
         """UI要素を作成"""
         # メインフレーム
         main_frame = ttk.Frame(self.window, padding="10")
         main_frame.pack(fill="both", expand=True)
 
-        # ヘッダー
+        # ヘッダーフレーム
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill="x", pady=(0, 10))
 
         ttk.Label(
             header_frame,
-            text="📊 タイムラインビューアー",
+            text="🎬 タイムラインビューアー",
             font=FONT_HEADER,
             foreground=COLOR_ACCENT,
         ).pack(side="left")
 
         ttk.Label(
             header_frame,
-            text=f"総時間: {self.total_time:.1f}秒 | ドローン数: {len(self.drone_schedules)}",
+            text=f"総時間: {self.total_time:.1f}秒",
             font=FONT_NORMAL,
             foreground="#666",
         ).pack(side="left", padx=(20, 0))
 
-        # スクロール可能なキャンバス
+        # ズームコントロール
+        zoom_frame = ttk.Frame(header_frame)
+        zoom_frame.pack(side="right")
+
+        ttk.Label(zoom_frame, text="ズーム:", font=FONT_NORMAL).pack(side="left")
+
+        ttk.Button(zoom_frame, text="－", command=self._zoom_out, width=3).pack(
+            side="left", padx=2
+        )
+
+        self.zoom_label = ttk.Label(zoom_frame, text="100%", font=FONT_NORMAL, width=6)
+        self.zoom_label.pack(side="left", padx=5)
+
+        ttk.Button(zoom_frame, text="＋", command=self._zoom_in, width=3).pack(
+            side="left", padx=2
+        )
+
+        # キャンバスフレーム
         canvas_frame = ttk.Frame(main_frame)
         canvas_frame.pack(fill="both", expand=True)
 
@@ -369,569 +132,399 @@ class TimelineViewerWindow:
         v_scrollbar.pack(side="right", fill="y")
 
         # キャンバス
-        self.canvas = Canvas(
+        self.canvas = tk.Canvas(
             canvas_frame,
             bg="white",
             xscrollcommand=h_scrollbar.set,
             yscrollcommand=v_scrollbar.set,
-            highlightthickness=1,
-            highlightbackground="#ccc",
         )
         self.canvas.pack(side="left", fill="both", expand=True)
 
         h_scrollbar.config(command=self.canvas.xview)
         v_scrollbar.config(command=self.canvas.yview)
 
-        # マウスホイールでのスクロールをバインド
-        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
+        # 凡例フレーム
+        legend_frame = ttk.Frame(main_frame)
+        legend_frame.pack(fill="x", pady=(10, 0))
 
-        # ズーム制御フレーム
-        zoom_frame = ttk.Frame(main_frame)
-        zoom_frame.pack(fill="x", pady=(10, 0))
+        ttk.Label(legend_frame, text="凡例:", font=FONT_BOLD_LARGE).pack(side="left")
 
-        ttk.Label(zoom_frame, text="ズーム:").pack(side="left", padx=(0, 5))
+        self._create_legend_item(legend_frame, "#90EE90", "音楽トラック")
+        self._create_legend_item(legend_frame, "#87CEEB", "ドローン動作")
+        self._create_legend_item(legend_frame, "#FFB6C1", "待機時間")
+        self._create_legend_item(legend_frame, "#FFE4B5", "インターバル")
 
-        ttk.Button(zoom_frame, text="－", width=3, command=self._zoom_out).pack(
-            side="left", padx=2
+    def _create_legend_item(self, parent, color, text):
+        """凡例アイテムを作成"""
+        item_frame = ttk.Frame(parent)
+        item_frame.pack(side="left", padx=(15, 0))
+
+        color_box = tk.Canvas(
+            item_frame, width=20, height=15, bg=color, highlightthickness=1
         )
-        ttk.Button(zoom_frame, text="＋", width=3, command=self._zoom_in).pack(
-            side="left", padx=2
-        )
-        ttk.Button(zoom_frame, text="リセット", command=self._zoom_reset).pack(
-            side="left", padx=(10, 0)
+        color_box.pack(side="left")
+
+        ttk.Label(item_frame, text=text, font=FONT_NORMAL).pack(
+            side="left", padx=(5, 0)
         )
 
-        self.zoom_label = ttk.Label(zoom_frame, text="100%")
-        self.zoom_label.pack(side="left", padx=(10, 0))
+    def _get_music_duration(self, music_path):
+        """
+        音楽ファイルの長さを取得
 
-        # 閉じるボタン
-        ttk.Button(zoom_frame, text="閉じる", command=self.window.destroy).pack(
-            side="right"
-        )
+        Args:
+            music_path: 音楽ファイルのパス
+
+        Returns:
+            float: 音楽の長さ（秒）、取得できない場合はNone
+        """
+        if not PYGAME_AVAILABLE:
+            return None
+
+        try:
+            # pygameの初期化が必要
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+
+            sound = pygame.mixer.Sound(music_path)
+            duration = sound.get_length()
+            return duration
+        except Exception as e:
+            print(f"音楽ファイルの長さ取得エラー ({os.path.basename(music_path)}): {e}")
+            return None
 
     def _draw_timeline(self):
         """タイムラインを描画"""
         self.canvas.delete("all")
 
-        # TAKEOFFイベントまたはALLターゲットのイベントがあるか確認
-        has_takeoff = (
-            any(
-                event.get("type") == "TAKEOFF" or event.get("target") == "ALL"
-                for event in self.schedule
-            )
-            if self.schedule
-            else False
+        # 音楽の合計時間を計算（音楽がドローンより長い場合に対応）
+        music_total_time = 0
+        if self.music_list:
+            for i, music_path in enumerate(self.music_list):
+                duration = self._get_music_duration(music_path)
+                if duration is None:
+                    # 取得できない場合は仮の値を使用
+                    duration = (
+                        self.total_time / len(self.music_list) if self.music_list else 0
+                    )
+                music_total_time += duration
+                # インターバルを追加
+                if i < len(self.music_list) - 1:
+                    music_total_time += self.interval_seconds
+
+        # タイムラインの表示幅を決定（ドローンと音楽のどちらか長い方）
+        display_time = max(self.total_time, music_total_time)
+
+        # キャンバスサイズを計算
+        total_width = (
+            self.timeline_start_x + int(display_time * self.pixels_per_second) + 100
         )
 
-        # 計算
-        timeline_width = int(
-            self.total_time * self.pixels_per_second + self.timeline_padding * 2
-        )
-        num_tracks = len(self.music_list) + len(self.drone_schedules)
-        if has_takeoff:
-            num_tracks += 1  # TAKEOFFトラック用に1つ追加
-        timeline_height = (
-            num_tracks + 1
-        ) * self.track_height + self.timeline_padding * 2
+        # ドローン名を取得
+        drone_names = self._get_drone_names()
+        num_rows = len(drone_names) + 1  # 音楽トラック + ドローン数
 
-        # キャンバスのスクロール領域を設定
-        self.canvas.config(
-            scrollregion=(0, 0, self.header_width + timeline_width, timeline_height)
-        )
+        total_height = self.header_height + (num_rows * self.row_height) + 50
 
-        # 初回描画時は左端にスクロール
-        self.canvas.xview_moveto(0)
-        self.canvas.yview_moveto(0)
+        self.canvas.config(scrollregion=(0, 0, total_width, total_height))
 
-        current_y = self.timeline_padding
-
-        # タイムスケールを描画
-        self._draw_time_scale(current_y, timeline_width)
-        current_y += self.track_height
+        # 時間軸を描画（表示時間を使用）
+        self._draw_time_axis(display_time)
 
         # 音楽トラックを描画
-        if self.music_list:
-            current_y = self._draw_music_tracks(current_y, timeline_width)
+        current_y = self.header_height
+        self._draw_music_track(current_y, display_time)
 
-        # ドローントラックを描画（TAKEOFFを除く）
-        current_y = self._draw_drone_tracks(current_y, timeline_width)
+        # 各ドローンのトラックを描画
+        current_y += self.row_height
+        for drone_name in drone_names:
+            self._draw_drone_track(drone_name, current_y, display_time)
+            current_y += self.row_height
 
-        # TAKEOFFトラックを最後に描画
-        if has_takeoff:
-            self._draw_takeoff_track(current_y, timeline_width)
+    def _get_drone_names(self):
+        """スケジュールからドローン名を取得"""
+        drone_names = set()
+        if self.schedule:
+            for event in self.schedule:
+                if event.get("type") in ["COMMAND", "WAIT"]:
+                    drone_names.add(event.get("target"))
+        return sorted(list(drone_names))
 
-    def _draw_time_scale(self, y: int, width: int):
-        """タイムスケールを描画"""
-        # 背景
-        self.canvas.create_rectangle(
-            0,
-            y,
-            self.header_width + width,
-            y + self.track_height,
-            fill="#f8f8f8",
-            outline="#ddd",
-        )
-
-        # ヘッダーラベル
-        self.canvas.create_text(
-            self.header_width // 2,
-            y + self.track_height // 2,
-            text="タイムライン",
-            font=FONT_HEADER,
-            fill=COLOR_TEXT,
-        )
-
-        # 時間目盛り
-        interval = 1  # 1秒ごと
-        for t in range(0, int(self.total_time) + 1, interval):
-            x = self.header_width + self.timeline_padding + t * self.pixels_per_second
-
-            # 目盛り線
-            self.canvas.create_line(
-                x,
-                y + self.track_height - 10,
-                x,
-                y + self.track_height,
-                fill="#999",
-                width=1,
-            )
-
-            # 時間ラベル（5秒ごと）
-            if t % 5 == 0:
-                self.canvas.create_text(
-                    x,
-                    y + self.track_height // 2,
-                    text=f"{t}s",
-                    font=("Arial", 8),
-                    fill="#666",
-                )
-
-    def _draw_music_tracks(self, start_y: int, width: int) -> int:
-        """音楽トラックを描画"""
-        current_y = start_y
-        current_time = 0.0
-
-        for i, music_path in enumerate(self.music_list):
-            # トラック背景
-            self.canvas.create_rectangle(
-                0,
-                current_y,
-                self.header_width + width,
-                current_y + self.track_height,
-                fill="#e8f4f8",
-                outline="#ccc",
-            )
-
-            # ヘッダー - YouTubeの場合はタイトルを表示
-            if self._is_youtube_url(music_path):
-                title = self.youtube_titles.get(music_path, "YouTube")
-                filename = f"🎬 {title}"
-            else:
-                filename = music_path.split("/")[-1].split("\\")[-1]
-
-            if len(filename) > 20:
-                filename = filename[:17] + "..."
-
-            self.canvas.create_text(
-                10,
-                current_y + self.track_height // 2,
-                text=f"🎵 {i + 1}. {filename}",
-                font=FONT_NORMAL,
-                fill=COLOR_ACCENT,
-                anchor="w",
-            )
-
-            # 音楽の長さを取得（キャッシュまたはデフォルト）
-            if music_path in self.waveform_data:
-                _, music_duration = self.waveform_data[music_path]
-            elif music_path in self.music_durations:
-                music_duration = self.music_durations[music_path]
-            else:
-                music_duration = 30.0  # デフォルト
-
-            # 音楽バーの位置
-            x_start = (
-                self.header_width
-                + self.timeline_padding
-                + current_time * self.pixels_per_second
-            )
-            x_end = x_start + music_duration * self.pixels_per_second
-
-            # 音楽バーの背景
-            self.canvas.create_rectangle(
-                x_start,
-                current_y + 5,
-                x_end,
-                current_y + self.track_height - 5,
-                fill=COLOR_ACCENT,
-                outline=COLOR_ACCENT,
-                width=2,
-            )
-
-            # 波形を描画
-            self._draw_waveform(music_path, x_start, x_end, current_y)
-
-            # 音楽名を左上に表示
-            if len(filename) > 15:
-                display_name = filename[:12] + "..."
-            else:
-                display_name = filename
-
-            self.canvas.create_text(
-                x_start + 5,
-                current_y + 12,
-                text=display_name,
-                font=("Arial", 8),
-                fill="white",
-                anchor="w",
-            )
-
-            # 再生時間を右下に表示
-            duration_text = (
-                f"{int(music_duration // 60)}:{int(music_duration % 60):02d}"
-            )
-            self.canvas.create_text(
-                x_end - 5,
-                current_y + self.track_height - 12,
-                text=duration_text,
-                font=("Arial", 7),
-                fill="white",
-                anchor="e",
-            )
-
-            current_time += music_duration + self.interval
-            current_y += self.track_height
-
-        return current_y
-
-    def _draw_waveform(self, music_path: str, x_start: float, x_end: float, y: int):
+    def _draw_time_axis(self, display_time=None):
         """
-        波形を描画
+        時間軸を描画
 
         Args:
-            music_path: 音楽ファイルのパス
-            x_start: 描画開始X座標
-            x_end: 描画終了X座標
-            y: トラックのY座標
+            display_time: 表示する時間の長さ（秒）。Noneの場合はself.total_timeを使用
         """
-        if music_path not in self.waveform_data:
-            # 読み込み中の場合はプレースホルダーを表示
-            if self.waveform_loading.get(music_path, False):
-                self.canvas.create_text(
-                    (x_start + x_end) / 2,
-                    y + self.track_height // 2,
-                    text="波形読み込み中...",
-                    font=("Arial", 8),
-                    fill="#aaccdd",
-                )
-            return
+        if display_time is None:
+            display_time = self.total_time
 
-        waveform, _ = self.waveform_data[music_path]
-        if not waveform:
-            return
+        y = self.header_height - 10
 
-        # 描画領域のサイズ
-        bar_width = x_end - x_start
-        bar_height = self.track_height - 20  # 上下のパディング
-        center_y = y + self.track_height // 2
-
-        # 波形ポイント数を画面幅に合わせて調整（3ピクセルごとに1ポイントに削減）
-        num_points = min(len(waveform), int(bar_width / 3))
-        if num_points <= 0:
-            return
-
-        # ダウンサンプリング
-        step = max(1, len(waveform) // num_points)
-
-        # 波形を描画（ミラー表示）- リスト内包表記で最適化
-        points_upper = []
-        points_lower = []
-
-        # バッチ処理でポイントを計算
-        waveform_len = len(waveform)
-        height_factor = (bar_height / 2) * 0.8
-
-        for i in range(0, waveform_len, step):
-            x = x_start + (i / waveform_len) * bar_width
-            amplitude = waveform[i] * height_factor
-
-            points_upper.append((x, center_y - amplitude))
-            points_lower.append((x, center_y + amplitude))
-
-        # ポイントが十分にある場合は波形を描画
-        if len(points_upper) >= 2:
-            # 上半分と下半分を結合してポリゴンを作成
-            all_points = points_upper + list(reversed(points_lower))
-            flat_points = [coord for point in all_points for coord in point]
-
-            # 波形を明るい色で塗りつぶし（smooth=Falseで軽量化）
-            self.canvas.create_polygon(
-                flat_points,
-                fill="#b8d4e8",  # 明るい青白色
-                outline="",  # アウトラインを削除して軽量化
-                width=0,
-                smooth=False,  # スムーズ処理を無効化して軽量化
-            )
-
-    def _draw_drone_tracks(self, start_y: int, width: int) -> int:
-        """ドローントラックを描画（TAKEOFFイベントを除く）
-
-        Returns:
-            次のトラックのY座標
-        """
-        current_y = start_y
-
-        for drone_name, events in sorted(self.drone_schedules.items()):
-            # トラック背景
-            self.canvas.create_rectangle(
-                0,
-                current_y,
-                self.header_width + width,
-                current_y + self.track_height,
-                fill="#fff",
-                outline="#ccc",
-            )
-
-            # ヘッダー
-            self.canvas.create_text(
-                self.header_width // 2,
-                current_y + self.track_height // 2,
-                text=f"🚁 {drone_name}",
-                font=FONT_NORMAL,
-                fill=COLOR_TEXT,
-                anchor="w",
-            )
-
-            # イベントごとにバーを描画（TAKEOFFは除く）
-            for event in events:
-                event_type = event.get("type", "INFO")
-
-                # TAKEOFFは別トラックで描画するのでスキップ
-                if event_type == "TAKEOFF":
-                    continue
-
-                event_time = event.get("time", 0)
-
-                # イベントの推定所要時間（コマンドによって異なる）
-                duration = self._estimate_event_duration(event)
-
-                x_start = (
-                    self.header_width
-                    + self.timeline_padding
-                    + event_time * self.pixels_per_second
-                )
-                x_end = x_start + duration * self.pixels_per_second
-
-                # イベントタイプによって色を変える
-                if event_type == "LAND":
-                    color = COLOR_ERROR
-                elif event_type == "COMMAND":
-                    # コマンドの内容で色分け
-                    command = event.get("command", "")
-                    color = self._get_command_color(command)
-                else:
-                    color = "#ccc"
-
-                # イベントバー
-                self.canvas.create_rectangle(
-                    x_start,
-                    current_y + 8,
-                    x_end,
-                    current_y + self.track_height - 8,
-                    fill=color,
-                    outline=color,
-                    width=1,
-                )
-
-                # イベント名（短縮表示）
-                event_text = event.get("text", event.get("command", ""))
-                if len(event_text) > 10:
-                    event_text = event_text[:8] + "..."
-
-                if x_end - x_start > 30:  # 十分な幅がある場合のみテキスト表示
-                    self.canvas.create_text(
-                        (x_start + x_end) // 2,
-                        current_y + self.track_height // 2,
-                        text=event_text,
-                        font=("Arial", 7),
-                        fill="white",
-                    )
-
-            current_y += self.track_height
-
-        return current_y
-
-    def _draw_takeoff_track(self, start_y: int, width: int):
-        """TAKEOFFイベントとALLターゲットを専用トラックとして描画（タイムラインの最後）"""
-        current_y = start_y
-
-        # TAKEOFFイベントとALLターゲットのイベントを収集
-        takeoff_events = (
-            [
-                event
-                for event in self.schedule
-                if event.get("type") == "TAKEOFF" or event.get("target") == "ALL"
-            ]
-            if self.schedule
-            else []
+        # 時間軸のライン
+        self.canvas.create_line(
+            self.timeline_start_x,
+            y,
+            self.timeline_start_x + int(display_time * self.pixels_per_second),
+            y,
+            fill="black",
+            width=2,
         )
 
-        if not takeoff_events:
-            return
+        # ズーム倍率に応じて表示間隔を決定
+        # pixels_per_secondが小さい（ズームアウト）ほど、間隔を広げる
+        if self.pixels_per_second >= 80:
+            interval = 1  # 1秒ごと
+        elif self.pixels_per_second >= 40:
+            interval = 2  # 2秒ごと
+        elif self.pixels_per_second >= 20:
+            interval = 5  # 5秒ごと
+        else:
+            interval = 10  # 10秒ごと
+
+        # 時間マーカー
+        for t in range(0, int(display_time) + 1):
+            x = self.timeline_start_x + int(t * self.pixels_per_second)
+
+            # 小さな目盛り（1秒ごと）
+            if t % interval == 0:
+                # 大きな目盛りとラベル
+                self.canvas.create_line(x, y - 5, x, y + 5, fill="black", width=2)
+
+                # 時間ラベル
+                self.canvas.create_text(
+                    x, y - 15, text=f"{t}s", font=("Arial", 9), fill="black"
+                )
+            else:
+                # 小さな目盛り
+                self.canvas.create_line(x, y - 3, x, y + 3, fill="gray", width=1)
+
+            # グリッドライン（主要な間隔のみ）
+            if t % interval == 0:
+                grid_height = (
+                    self.header_height
+                    + (len(self._get_drone_names()) + 1) * self.row_height
+                )
+                self.canvas.create_line(
+                    x,
+                    self.header_height,
+                    x,
+                    grid_height,
+                    fill="#E0E0E0",
+                    width=1,
+                    dash=(2, 4),
+                )
+
+    def _draw_music_track(self, y, display_time=None):
+        """
+        音楽トラックを描画
+
+        Args:
+            y: トラックのY座標
+            display_time: 表示する時間の長さ（秒）。Noneの場合はself.total_timeを使用
+        """
+        if display_time is None:
+            display_time = self.total_time
+
+        # トラックラベル
+        self.canvas.create_text(
+            10,
+            y + self.row_height // 2,
+            text="🎵 音楽",
+            font=FONT_BOLD_LARGE,
+            anchor="w",
+            fill=COLOR_ACCENT,
+        )
 
         # トラック背景
         self.canvas.create_rectangle(
-            0,
-            current_y,
-            self.header_width + width,
-            current_y + self.track_height,
-            fill="#e8f8e8",  # 薄い緑色の背景
-            outline="#ccc",
+            self.timeline_start_x,
+            y,
+            self.timeline_start_x + int(display_time * self.pixels_per_second),
+            y + self.row_height,
+            fill="#F5F5F5",
+            outline="#CCCCCC",
         )
 
-        # ヘッダー
-        self.canvas.create_text(
-            self.header_width // 2,
-            current_y + self.track_height // 2,
-            text="🛫 離陸",
-            font=FONT_NORMAL,
-            fill=COLOR_SUCCESS,
-            anchor="w",
-        )
+        # 音楽ファイルを配置
+        current_time = 0
+        for i, music_path in enumerate(self.music_list):
+            filename = os.path.basename(music_path)
 
-        # TAKEOFFイベントを描画
-        for event in takeoff_events:
-            event_time = event.get("time", 0)
-            duration = self._estimate_event_duration(event)
+            # 実際のファイルから長さを取得
+            duration = self._get_music_duration(music_path)
+            if duration is None:
+                # 取得できない場合は仮の長さを使用
+                if self.music_list:
+                    duration = self.total_time / len(self.music_list)
+                else:
+                    duration = 0
 
-            x_start = (
-                self.header_width
-                + self.timeline_padding
-                + event_time * self.pixels_per_second
+            x1 = self.timeline_start_x + int(current_time * self.pixels_per_second)
+            x2 = self.timeline_start_x + int(
+                (current_time + duration) * self.pixels_per_second
             )
-            x_end = x_start + duration * self.pixels_per_second
 
-            # イベントバー
+            # 音楽ブロック
             self.canvas.create_rectangle(
-                x_start,
-                current_y + 8,
-                x_end,
-                current_y + self.track_height - 8,
-                fill=COLOR_SUCCESS,
-                outline=COLOR_SUCCESS,
-                width=1,
+                x1,
+                y + 5,
+                x2,
+                y + self.row_height - 5,
+                fill="#90EE90",
+                outline="#228B22",
+                width=2,
             )
 
-            # イベント名
-            event_text = event.get("text", "離陸")
-            if len(event_text) > 20:
-                event_text = event_text[:17] + "..."
+            # ファイル名（短縮）
+            display_name = filename if len(filename) < 20 else filename[:17] + "..."
+            self.canvas.create_text(
+                x1 + 5,
+                y + self.row_height // 2,
+                text=display_name,
+                font=("Arial", 9),
+                anchor="w",
+                fill="black",
+            )
 
-            if x_end - x_start > 30:
-                self.canvas.create_text(
-                    (x_start + x_end) // 2,
-                    current_y + self.track_height // 2,
-                    text=event_text,
-                    font=("Arial", 7),
-                    fill="white",
+            current_time += duration
+
+            # インターバル
+            if i < len(self.music_list) - 1 and self.interval_seconds > 0:
+                interval_x1 = x2
+                interval_x2 = interval_x1 + int(
+                    self.interval_seconds * self.pixels_per_second
                 )
 
-    def _get_command_color(self, command: str) -> str:
+                self.canvas.create_rectangle(
+                    interval_x1,
+                    y + 5,
+                    interval_x2,
+                    y + self.row_height - 5,
+                    fill="#FFE4B5",
+                    outline="#FFA500",
+                    width=1,
+                    dash=(4, 2),
+                )
+
+                self.canvas.create_text(
+                    interval_x1 + 3,
+                    y + 10,
+                    text="待機",
+                    font=("Arial", 8),
+                    anchor="w",
+                    fill="#FF8C00",
+                )
+
+                current_time += self.interval_seconds
+
+    def _draw_drone_track(self, drone_name, y, display_time=None):
         """
-        コマンドの内容に応じた色を返す
+        ドローンのトラックを描画
 
         Args:
-            command: ドローンコマンド文字列
-
-        Returns:
-            色コード（HEX形式）
+            drone_name: ドローン名
+            y: トラックのY座標
+            display_time: 表示する時間の長さ（秒）。Noneの場合はself.total_timeを使用
         """
-        command_lower = command.lower()
+        if display_time is None:
+            display_time = self.total_time
 
-        # 左右移動（left/right）- 青系
-        if "left" in command_lower or "right" in command_lower:
-            return "#3498db"  # 明るい青
+        # トラックラベル
+        self.canvas.create_text(
+            10,
+            y + self.row_height // 2,
+            text=f"🚁 {drone_name}",
+            font=FONT_NORMAL,
+            anchor="w",
+            fill="#333",
+        )
 
-        # 上下移動（up/down）- 紫系
-        if "up" in command_lower or "down" in command_lower:
-            return "#9b59b6"  # 紫
+        # トラック背景
+        self.canvas.create_rectangle(
+            self.timeline_start_x,
+            y,
+            self.timeline_start_x + int(display_time * self.pixels_per_second),
+            y + self.row_height,
+            fill="#FAFAFA",
+            outline="#CCCCCC",
+        )
 
-        # 前後移動（forward/back）- オレンジ系
-        if "forward" in command_lower or "back" in command_lower:
-            return "#e67e22"  # オレンジ
+        # スケジュールからこのドローンのイベントを抽出
+        if not self.schedule:
+            return
 
-        # 回転（cw/ccw/rotate）- ピンク系
-        if "cw" in command_lower or "ccw" in command_lower or "rotate" in command_lower:
-            return "#e91e63"  # ピンク
+        for event in self.schedule:
+            if event.get("target") != drone_name:
+                continue
 
-        # フリップ - 水色
-        if "flip" in command_lower:
-            return "#00bcd4"  # シアン
+            start_time = event.get("time", 0)
 
-        # その他のコマンド - グレー
-        return "#7f8c8d"
+            if event.get("type") == "COMMAND":
+                # コマンド実行ブロック
+                command = event.get("command", "")
+                duration = 0.5  # コマンドの仮の実行時間
 
-    def _estimate_event_duration(self, event: Dict) -> float:
-        """イベントの推定所要時間を計算（秒）"""
-        event_type = event.get("type", "INFO")
+                x1 = self.timeline_start_x + int(start_time * self.pixels_per_second)
+                x2 = x1 + int(duration * self.pixels_per_second)
 
-        if event_type == "TAKEOFF":
-            return 3.0  # 離陸は約3秒
-        elif event_type == "LAND":
-            return 3.0  # 着陸は約3秒
-        elif event_type == "COMMAND":
-            command = event.get("command", "")
-            # コマンドに応じて時間を推定
-            if (
-                "forward" in command
-                or "back" in command
-                or "left" in command
-                or "right" in command
-            ):
-                # 移動コマンドの距離から推定（例: forward 100 → 約2秒）
-                try:
-                    distance = int(command.split()[-1])
-                    return distance / 50.0  # 50cm/秒と仮定
-                except:
-                    return 1.0
-            elif "rotate" in command or "cw" in command or "ccw" in command:
-                # 回転コマンド
-                try:
-                    angle = int(command.split()[-1])
-                    return angle / 90.0  # 90度/秒と仮定
-                except:
-                    return 1.0
-            else:
-                return 1.0
-        elif event_type == "WAIT":
-            # 待機時間
-            text = event.get("text", "")
-            try:
-                # "待機: X秒" の形式から抽出
-                if "秒" in text:
-                    return float(text.split("秒")[0].split()[-1])
-            except:
-                pass
-            return 1.0
-        else:
-            return 0.5
+                self.canvas.create_rectangle(
+                    x1,
+                    y + 8,
+                    x2,
+                    y + self.row_height - 8,
+                    fill="#87CEEB",
+                    outline="#4682B4",
+                    width=2,
+                )
+
+                # コマンド名を短縮表示
+                cmd_text = command if len(command) < 10 else command[:7] + "..."
+                self.canvas.create_text(
+                    x1 + 3,
+                    y + self.row_height // 2,
+                    text=cmd_text,
+                    font=("Arial", 8),
+                    anchor="w",
+                    fill="black",
+                )
+
+            elif event.get("type") == "WAIT":
+                # 待機ブロック
+                wait_time = event.get("duration", 0)
+
+                x1 = self.timeline_start_x + int(start_time * self.pixels_per_second)
+                x2 = x1 + int(wait_time * self.pixels_per_second)
+
+                self.canvas.create_rectangle(
+                    x1,
+                    y + 8,
+                    x2,
+                    y + self.row_height - 8,
+                    fill="#FFB6C1",
+                    outline="#FF69B4",
+                    width=1,
+                )
+
+                self.canvas.create_text(
+                    x1 + 3,
+                    y + self.row_height // 2,
+                    text=f"待機 {wait_time:.1f}s",
+                    font=("Arial", 8),
+                    anchor="w",
+                    fill="#8B008B",
+                )
 
     def _zoom_in(self):
         """ズームイン"""
-        self.pixels_per_second = int(self.pixels_per_second * 1.2)
+        self.pixels_per_second = min(200, self.pixels_per_second * 1.5)
         self._update_zoom_label()
         self._draw_timeline()
 
     def _zoom_out(self):
         """ズームアウト"""
-        self.pixels_per_second = max(10, int(self.pixels_per_second / 1.2))
-        self._update_zoom_label()
-        self._draw_timeline()
-
-    def _zoom_reset(self):
-        """ズームをリセット"""
-        self.pixels_per_second = 50
+        self.pixels_per_second = max(10, self.pixels_per_second / 1.5)
         self._update_zoom_label()
         self._draw_timeline()
 
@@ -939,13 +532,3 @@ class TimelineViewerWindow:
         """ズームラベルを更新"""
         zoom_percent = int((self.pixels_per_second / 50) * 100)
         self.zoom_label.config(text=f"{zoom_percent}%")
-
-    def _on_mousewheel(self, event):
-        """マウスホイールで縦スクロール"""
-        # Windowsの場合: event.delta は 120 or -120
-        # 正の値で上スクロール、負の値で下スクロール
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def _on_shift_mousewheel(self, event):
-        """Shift+マウスホイールで横スクロール"""
-        self.canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
