@@ -517,7 +517,8 @@ class TelloApp:
                 evts = [e for e in self.schedule if e["time"] == t]
                 start = current_line
                 for e in evts:
-                    cmd_str = e.get("command", "")
+                    # COMMAND の説明は parser が付与する `text` を優先表示
+                    cmd_str = e.get("text") or e.get("command", "")
                     type_str = e.get("type", "INFO")
 
                     if type_str == "TAKEOFF":
@@ -634,6 +635,15 @@ class TelloApp:
                         self.update_timeline_highlight(item.get("time"))
                     elif t == "clear_highlight":
                         self.update_timeline_highlight(None)
+                    elif t == "parse_log":
+                        # 解析ログは schedule_text に出力する
+                        self.schedule_text.config(state="normal")
+                        lvl = item.get("level", "INFO")
+                        self.schedule_text.insert(
+                            tk.END, item.get("message", "") + "\n", lvl
+                        )
+                        self.schedule_text.see(tk.END)
+                        self.schedule_text.config(state="disabled")
                     elif t == "connection_success":
                         self.controllers = item["controllers"]
                         self.start_btn["state"] = "normal"

@@ -21,6 +21,37 @@ class ScratchProjectParser:
     def log(self, message, level="INFO"):
         self.log_queue.put({"level": level, "message": message})
 
+    def log_parse(self, message, level="INFO"):
+        """Push a parse-specific log entry so the GUI can route it to
+        the 解析ログ pane."""
+        self.log_queue.put({"type": "parse_log", "level": level, "message": message})
+
+    def _describe_command(self, cmd):
+        """Generate a short Japanese description for a command dict."""
+        if not isinstance(cmd, dict):
+            return str(cmd)
+        if "action" in cmd:
+            a = cmd.get("action")
+            p = cmd.get("parameters", {}) or {}
+            if a == "move_by":
+                return f"相対移動: dx={p.get('dx', 0)} dy={p.get('dy', 0)}"
+            if a == "move_to_local":
+                return f"局所移動: lx={p.get('lx', 0)} ly={p.get('ly', 0)}"
+            if a == "turn_right":
+                return f"右回転: {p.get('degrees',0)}度"
+            if a == "turn_left":
+                return f"左回転: {p.get('degrees',0)}度"
+            if a == "change_size_by":
+                return f"サイズ変化: Δ={p.get('change',0)}"
+            if a == "set_size_to":
+                return f"サイズ設定: {p.get('size',0)}"
+            if a == "set_stage_size":
+                return f"ステージサイズ変更: {p.get('width',0)}x{p.get('height',0)}"
+            return a
+        if "command" in cmd:
+            return cmd.get("command")
+        return str(cmd)
+
     def _load_project_data(self):
         try:
             with zipfile.ZipFile(self.sb3_path, "r") as z:
@@ -386,7 +417,7 @@ class ScratchProjectParser:
                             local_action_sequence.extend(nested_actions)
 
                 elif canon_opcode.startswith("preview_"):
-                    self.log(
+                    self.log_parse(
                         f"Parsing preview block: original={opcode} canonical={canon_opcode}",
                         level="DEBUG",
                     )
@@ -416,7 +447,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_turnRight":
                         degrees = self._get_input_value(
@@ -438,7 +469,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_moveBy":
                         dx = self._get_input_value(
@@ -467,7 +498,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_moveXBy":
                         dx = self._get_input_value(
@@ -490,7 +521,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_moveYBy":
                         dy = self._get_input_value(
@@ -513,7 +544,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_moveToLocal":
                         lx = self._get_input_value(
@@ -542,7 +573,7 @@ class ScratchProjectParser:
                                 "sprite_name": sprite_name,
                             }
                         )
-                        self.log(f"Added action: {cmd}", level="DEBUG")
+                        self.log_parse(f"Added action: {cmd}", level="DEBUG")
 
                     elif canon_opcode == "preview_changeSizeBy":
                         change = self._get_input_value(
@@ -652,6 +683,20 @@ class ScratchProjectParser:
             for sprite_name, action_list in all_actions.items():
                 if action_list:
                     action = action_list.pop(0)
+                    # サイズ変更系 (ステージ/スプライト) はタイムラインや飛行時間に含めない
+                    cmds = action.get("commands", [])
+                    size_actions = {"set_stage_size", "change_size_by", "set_size_to"}
+                    if cmds and all(
+                        isinstance(c, dict) and c.get("action") in size_actions
+                        for c in cmds
+                    ):
+                        self.log_parse(
+                            f"Ignored size-change action for timeline (target: {action.get('sprite_name')})",
+                            level="DEBUG",
+                        )
+                        # スキップして次のスプライトへ（時間に影響させない）
+                        continue
+
                     actions_this_step.append(action)
                     max_duration_this_step = max(
                         max_duration_this_step, action["duration"]
@@ -675,7 +720,16 @@ class ScratchProjectParser:
                         }
                     )
                 for cmd in action.get("commands", []):
-                    cmd.update({"time": master_time, "type": "COMMAND"})
+                    # 出力用の説明を作成して解析ログに流す
+                    desc = self._describe_command(cmd)
+                    self.log_parse(
+                        f"実行：{desc} (対象: {cmd.get('target')})", level="INFO"
+                    )
+                    # タイムライン表示用テキストを追加
+                    cmd_text = desc
+                    cmd.update(
+                        {"time": master_time, "type": "COMMAND", "text": cmd_text}
+                    )
                     final_event_list.append(cmd)
             master_time += max_duration_this_step
 
