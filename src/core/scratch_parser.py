@@ -6,6 +6,9 @@ import math
 class ScratchProjectParser:
     def __init__(self, sb3_path, log_queue):
         self.TAKEOFF_DURATION = 8.0
+        # delay inserted between consecutive actions (seconds)
+        # set to 1.5s to satisfy "1,2秒のディレイ" request (midpoint)
+        self.INTER_COMMAND_DELAY = 1.5
         self.MIN_TELLO_MOVE = 20
         self.SCRATCH_TO_CM_RATE = 1
         self.INITIAL_HOVER_HEIGHT_CM = 80
@@ -33,10 +36,62 @@ class ScratchProjectParser:
         if "action" in cmd:
             a = cmd.get("action")
             p = cmd.get("parameters", {}) or {}
+
+            def _fmt(v):
+                try:
+                    fv = float(v)
+                    if abs(fv - int(fv)) < 1e-6:
+                        return str(int(fv))
+                    return f"{fv:.2f}"
+                except Exception:
+                    return str(v)
+
             if a == "move_by":
-                return f"相対移動: dx={p.get('dx', 0)} dy={p.get('dy', 0)}"
+                dx = p.get("dx", 0) or 0
+                dy = p.get("dy", 0) or 0
+                parts = []
+                try:
+                    dxv = float(dx)
+                except Exception:
+                    dxv = 0
+                try:
+                    dyv = float(dy)
+                except Exception:
+                    dyv = 0
+                if dxv > 0:
+                    parts.append(f"右に{_fmt(dxv)}cm")
+                elif dxv < 0:
+                    parts.append(f"左に{_fmt(abs(dxv))}cm")
+                if dyv > 0:
+                    parts.append(f"前に{_fmt(dyv)}cm")
+                elif dyv < 0:
+                    parts.append(f"後ろに{_fmt(abs(dyv))}cm")
+                if parts:
+                    return ", ".join(parts)
+                return "移動なし"
             if a == "move_to_local":
-                return f"局所移動: lx={p.get('lx', 0)} ly={p.get('ly', 0)}"
+                lx = p.get("lx", 0) or 0
+                ly = p.get("ly", 0) or 0
+                parts = []
+                try:
+                    lxv = float(lx)
+                except Exception:
+                    lxv = 0
+                try:
+                    lyv = float(ly)
+                except Exception:
+                    lyv = 0
+                if lxv > 0:
+                    parts.append(f"右に{_fmt(lxv)}cm")
+                elif lxv < 0:
+                    parts.append(f"左に{_fmt(abs(lxv))}cm")
+                if lyv > 0:
+                    parts.append(f"前に{_fmt(lyv)}cm")
+                elif lyv < 0:
+                    parts.append(f"後ろに{_fmt(abs(lyv))}cm")
+                if parts:
+                    return ", ".join(parts)
+                return "移動なし"
             if a == "turn_right":
                 return f"右回転: {p.get('degrees',0)}度"
             if a == "turn_left":
@@ -49,7 +104,33 @@ class ScratchProjectParser:
                 return f"ステージサイズ変更: {p.get('width',0)}x{p.get('height',0)}"
             return a
         if "command" in cmd:
-            return cmd.get("command")
+            # Try to localize simple movement commands like 'right 20', 'forward 30', 'up 10'
+            c = cmd.get("command", "")
+            try:
+                m = re.match(
+                    r"^\s*(right|left|forward|back|up|down)\s+(-?\d+(?:\.\d+)?)\s*$",
+                    c,
+                    re.I,
+                )
+                if m:
+                    verb = m.group(1).lower()
+                    val = float(m.group(2))
+                    unit = "cm"
+                    if verb == "right":
+                        return f"右に{int(val) if abs(val-int(val))<1e-6 else f'{val:.2f}'}{unit}"
+                    if verb == "left":
+                        return f"左に{int(abs(val)) if abs(val-int(val))<1e-6 else f'{abs(val):.2f}'}{unit}"
+                    if verb == "forward":
+                        return f"前に{int(val) if abs(val-int(val))<1e-6 else f'{val:.2f}'}{unit}"
+                    if verb == "back":
+                        return f"後ろに{int(abs(val)) if abs(val-int(val))<1e-6 else f'{abs(val):.2f}'}{unit}"
+                    if verb == "up":
+                        return f"高さ{int(val) if abs(val-int(val))<1e-6 else f'{val:.2f}'}{unit}"
+                    if verb == "down":
+                        return f"高さ-{int(abs(val)) if abs(val-int(val))<1e-6 else f'{abs(val):.2f}'}{unit}"
+            except Exception:
+                pass
+            return c
         return str(cmd)
 
     def _load_project_data(self):
@@ -625,9 +706,27 @@ class ScratchProjectParser:
                 current_block_id = block.get("next")
             return local_action_sequence, (px, py, pz), current_vars
 
-        return _traverse_blocks(start_block_id, (pos_x, pos_y, pos_z), variable_state)[
-            0
-        ]
+        actions = _traverse_blocks(
+            start_block_id, (pos_x, pos_y, pos_z), variable_state
+        )[0]
+        # Insert inter-command delays between consecutive non-wait actions
+        if getattr(self, "INTER_COMMAND_DELAY", 0):
+            new_actions = []
+            for i, a in enumerate(actions):
+                new_actions.append(a)
+                # if this action is not a wait and there is a following action, insert a short wait
+                if not a.get("is_wait") and i < len(actions) - 1:
+                    # avoid inserting if next is a size-change which will be ignored later
+                    new_actions.append(
+                        {
+                            "duration": float(self.INTER_COMMAND_DELAY),
+                            "commands": [],
+                            "is_wait": True,
+                            "sprite_name": sprite_name,
+                        }
+                    )
+            actions = new_actions
+        return actions
 
     def parse_to_schedule(self):
         if not self.project_data:
