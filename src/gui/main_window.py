@@ -38,15 +38,7 @@ try:
     from core.network_manager import NetworkManager
     from core.music_player import MusicPlayer
 except ImportError:
-    # フォールバック
-    from scratch_parser import ScratchProjectParser
-    from show_runner import ShowRunner
-    from music_player import MusicPlayer
-
-    try:
-        from network_manager import NetworkManager
-    except ImportError:
-        NetworkManager = None
+    NetworkManager = None
 
 from .music_manager_window import MusicManagerWindow
 from .timeline_viewer_window import TimelineViewerWindow
