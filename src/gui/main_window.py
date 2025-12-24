@@ -9,7 +9,8 @@ import json
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext
+import ttkbootstrap as ttk
 from queue import Queue
 
 # Ensure repository src root is on sys.path so running this file directly works
@@ -101,42 +102,20 @@ class TelloApp:
         self._update_telemetry_loop()
 
     def _configure_styles(self):
+        # ttkbootstrapを使用しているため、テーマに基づいたスタイルが自動的に適用されます。
+        # ここでは、アプリケーション固有のフォントやラベルのスタイルのみを微調整します。
         s = ttk.Style()
-        s.theme_use("clam")
-        s.configure(
-            ".", background=COLOR_BACKGROUND, foreground="black", font=self.font_normal
-        )
-        s.configure("TFrame", background=COLOR_BACKGROUND)
-        s.configure("TLabel", background=COLOR_BACKGROUND, foreground="black")
-        s.configure("Header.TLabel", font=self.font_header, foreground=COLOR_ACCENT)
-        s.configure("TLabelframe", background=COLOR_BACKGROUND)
-        s.configure("TLabelframe.Label", font=self.font_bold_large, foreground="#333")
-        s.configure("TButton", font=self.font_normal, padding=6)
-        s.configure(
-            "Accent.TButton",
-            font=self.font_normal,
-            padding=8,
-            foreground="white",
-            background=COLOR_ACCENT,
-        )
-        s.map(
-            "Accent.TButton",
-            background=[("active", COLOR_ACCENT_HOVER), ("disabled", "#8abadd")],
-        )
-        s.configure(
-            "Stop.TButton",
-            font=self.font_normal,
-            padding=8,
-            foreground="white",
-            background=COLOR_STOP,
-        )
-        s.map(
-            "Stop.TButton",
-            background=[("active", COLOR_STOP_HOVER), ("disabled", "#e89c9f")],
-        )
+
+        # ヘッダーラベルのスタイル
+        s.configure("Header.TLabel", font=self.font_header)
+
+        # バッテリー状態のラベルスタイル
         s.configure("BatteryOK.TLabel", foreground="green", font=self.font_header)
         s.configure("BatteryLow.TLabel", foreground="red", font=self.font_header)
         s.configure("BatteryOffline.TLabel", foreground="gray", font=self.font_normal)
+
+        # LabelFrameのタイトルフォント
+        s.configure("TLabelframe.Label", font=self.font_bold_large)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self.master, padding="15")
@@ -148,7 +127,7 @@ class TelloApp:
         left_frame.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
 
         # --- ① ドローン設定 ---
-        ip_frame = ttk.LabelFrame(
+        ip_frame = ttk.Labelframe(
             left_frame, text="① ドローンの設定 (テレメトリ)", padding="10"
         )
         ip_frame.pack(fill="x", pady=(0, 15))
@@ -165,43 +144,62 @@ class TelloApp:
         ip_button_frame = ttk.Frame(ip_frame)
         ip_button_frame.pack(fill="x", pady=(10, 5))
 
-        ttk.Button(ip_button_frame, text="＋ 追加", command=self.add_drone_entry).pack(
-            side="left", expand=True, fill="x", padx=(0, 2)
-        )
         ttk.Button(
-            ip_button_frame, text="－ 削除", command=self.remove_drone_entry
+            ip_button_frame,
+            text="＋ 追加",
+            command=self.add_drone_entry,
+            bootstyle="secondary-outline",
+        ).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(
+            ip_button_frame,
+            text="－ 削除",
+            command=self.remove_drone_entry,
+            bootstyle="secondary-outline",
         ).pack(side="left", expand=True, fill="x", padx=(2, 2))
         ttk.Button(
-            ip_button_frame, text="📡 Wi-Fi接続", command=self.auto_connect_wifi
+            ip_button_frame,
+            text="📡 Wi-Fi接続",
+            command=self.auto_connect_wifi,
+            bootstyle="secondary-outline",
         ).pack(side="left", expand=True, fill="x", padx=(2, 2))
         ttk.Button(
-            ip_button_frame, text="🔍 IP検出", command=self.auto_detect_drones
+            ip_button_frame,
+            text="🔍 IP検出",
+            command=self.auto_detect_drones,
+            bootstyle="secondary-outline",
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
-        ttk.Button(ip_frame, text="⚙️ 設定を保存", command=self.save_config).pack(
-            fill="x", pady=(10, 0)
-        )
+        ttk.Button(
+            ip_frame,
+            text="⚙️ 設定を保存",
+            command=self.save_config,
+            bootstyle="secondary",
+        ).pack(fill="x", pady=(10, 0))
 
         # --- ② プロジェクト ---
-        file_frame = ttk.LabelFrame(left_frame, text="② プロジェクト", padding="10")
+        file_frame = ttk.Labelframe(left_frame, text="② プロジェクト", padding="10")
         file_frame.pack(fill="x", pady=(0, 15))
         self.sb3_path_label = ttk.Label(
             file_frame, text="ファイル未選択", wraplength=230
         )
         self.sb3_path_label.pack(fill="x", pady=(0, 10))
         ttk.Button(
-            file_frame, text="📂 Scratchファイルを開く", command=self.select_file
+            file_frame,
+            text="📂 Scratchファイルを開く",
+            command=self.select_file,
+            bootstyle="secondary-outline",
         ).pack(fill="x", pady=(0, 5))
         self.parse_btn = ttk.Button(
             file_frame,
             text="🔄 タイムラインを解析",
             command=self.parse_scratch_project,
             state="disabled",
+            bootstyle="secondary-outline",
         )
         self.parse_btn.pack(fill="x")
 
         # --- ③ 音楽・演出 ---
-        music_frame = ttk.LabelFrame(left_frame, text="③ 音楽・演出", padding="10")
+        music_frame = ttk.Labelframe(left_frame, text="③ 音楽・演出", padding="10")
         music_frame.pack(fill="x", pady=(0, 15))
         self.music_info_label = ttk.Label(
             music_frame, text="音楽未設定", wraplength=230
@@ -209,25 +207,30 @@ class TelloApp:
         self.music_info_label.pack(fill="x", pady=(0, 10))
         btn_grid = ttk.Frame(music_frame)
         btn_grid.pack(fill="x")
-        ttk.Button(btn_grid, text="🎵 音楽管理", command=self.open_music_manager).pack(
-            side="left", fill="x", expand=True, padx=(0, 2)
-        )
+        ttk.Button(
+            btn_grid,
+            text="🎵 音楽管理",
+            command=self.open_music_manager,
+            bootstyle="secondary-outline",
+        ).pack(side="left", fill="x", expand=True, padx=(0, 2))
         self.timeline_btn = ttk.Button(
             btn_grid,
             text="📊 タイムライン",
             command=self.open_timeline_viewer,
             state="disabled",
+            bootstyle="secondary-outline",
         )
         self.timeline_btn.pack(side="left", fill="x", expand=True, padx=(2, 0))
 
         # --- ④ ショー実行 ---
-        action_frame = ttk.LabelFrame(left_frame, text="④ ショー実行", padding="10")
+        action_frame = ttk.Labelframe(left_frame, text="④ ショー実行", padding="10")
         action_frame.pack(fill="x", pady=(0, 15))
         self.connect_btn = ttk.Button(
             action_frame,
             text="📡 ドローンに接続",
             command=self.connect_drones,
             state="disabled",
+            bootstyle="secondary",
         )
         self.connect_btn.pack(fill="x", pady=(0, 5))
         self.start_btn = ttk.Button(
@@ -235,7 +238,7 @@ class TelloApp:
             text="▶️ ショーを開始",
             command=self.start_show,
             state="disabled",
-            style="Accent.TButton",
+            bootstyle="primary",
         )
         self.start_btn.pack(fill="x", pady=(5, 5))
         self.stop_btn = ttk.Button(
@@ -243,7 +246,7 @@ class TelloApp:
             text="⏹️ 緊急停止",
             command=self.emergency_stop,
             state="disabled",
-            style="Stop.TButton",
+            bootstyle="danger",
         )
         self.stop_btn.pack(fill="x", pady=(5, 0))
 
@@ -260,7 +263,7 @@ class TelloApp:
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
-        log_pane = ttk.PanedWindow(right_frame, orient="horizontal")
+        log_pane = ttk.Panedwindow(right_frame, orient="horizontal")
         log_pane.pack(fill="both", expand=True)
 
         timeline_frame = ttk.Frame(log_pane)

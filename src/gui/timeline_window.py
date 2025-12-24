@@ -3,7 +3,7 @@
 """
 
 import tkinter as tk
-from tkinter import ttk
+import ttkbootstrap as ttk
 import os
 
 from config import (
@@ -54,7 +54,7 @@ class TimelineViewerWindow:
         self.music_player = music_player
 
         # ウィンドウの作成
-        self.window = tk.Toplevel(parent)
+        self.window = ttk.Toplevel(parent)
         self.window.title("タイムラインビューワー")
         self.window.geometry("1000x600")
         self.window.minsize(800, 400)
@@ -88,12 +88,16 @@ class TimelineViewerWindow:
             variable=self.zoom_level,
             orient="horizontal",
             command=lambda _: self.draw_timeline(),
+            bootstyle="primary",
         )
         zoom_scale.pack(side="left", padx=5, fill="x", expand=True)
 
-        ttk.Button(toolbar, text="リセット", command=self._reset_zoom).pack(
-            side="left", padx=5
-        )
+        ttk.Button(
+            toolbar,
+            text="リセット",
+            command=self._reset_zoom,
+            bootstyle="secondary-outline",
+        ).pack(side="left", padx=5)
 
         self.time_label = ttk.Label(
             toolbar, text="時間: 0.00s / 0.00s", font=FONT_NORMAL

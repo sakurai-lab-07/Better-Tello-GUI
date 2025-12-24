@@ -3,7 +3,8 @@
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
+import ttkbootstrap as ttk
 import os
 
 from config import (
@@ -42,7 +43,7 @@ class MusicManagerWindow:
         self.interval_seconds = tk.DoubleVar(value=music_player.get_interval())
 
         # ウィンドウの作成
-        self.window = tk.Toplevel(parent)
+        self.window = ttk.Toplevel(parent)
         self.window.title("音楽管理 - メドレー設定")
         self.window.geometry("700x700")
         self.window.minsize(600, 650)
@@ -72,20 +73,14 @@ class MusicManagerWindow:
 
     def _configure_styles(self):
         """スタイルを設定"""
+        # ttkbootstrapを使用しているため、テーマに基づいたスタイルが自動的に適用されます。
         s = ttk.Style()
-        s.configure("MusicManager.TFrame", background=COLOR_BACKGROUND)
-        s.configure(
-            "MusicManager.TLabel",
-            background=COLOR_BACKGROUND,
-            foreground="black",
-            font=FONT_NORMAL,
-        )
-        s.configure("MusicHeader.TLabel", font=FONT_HEADER, foreground=COLOR_ACCENT)
+        s.configure("MusicHeader.TLabel", font=FONT_HEADER)
 
     def _create_widgets(self):
         """UI要素を作成"""
         # メインフレーム
-        main_frame = ttk.Frame(self.window, padding="15", style="MusicManager.TFrame")
+        main_frame = ttk.Frame(self.window, padding="15")
         main_frame.pack(fill="both", expand=True)
         main_frame.grid_rowconfigure(1, weight=1)
         main_frame.grid_columnconfigure(0, weight=1)
@@ -108,7 +103,7 @@ class MusicManagerWindow:
         ).pack(side="left", padx=(10, 0))
 
         # 音楽リストフレーム
-        list_frame = ttk.LabelFrame(
+        list_frame = ttk.Labelframe(
             main_frame, text="音楽リスト（再生順）", padding="10"
         )
         list_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
@@ -133,30 +128,54 @@ class MusicManagerWindow:
         self.listbox.bind("<Double-Button-1>", lambda e: self._preview_selected())
 
         # ボタンフレーム（リストの横）
-        btn_frame = ttk.Frame(list_frame, style="MusicManager.TFrame")
+        btn_frame = ttk.Frame(list_frame)
         btn_frame.grid(row=0, column=2, sticky="ns", padx=(10, 0))
 
-        ttk.Button(btn_frame, text="➕ 追加", command=self._add_music, width=12).pack(
-            pady=2
-        )
-        ttk.Button(btn_frame, text="🗑️ 削除", command=self._remove_music, width=12).pack(
-            pady=2
-        )
-        ttk.Button(btn_frame, text="⬆️ 上へ", command=self._move_up, width=12).pack(
-            pady=2
-        )
-        ttk.Button(btn_frame, text="⬇️ 下へ", command=self._move_down, width=12).pack(
-            pady=2
-        )
         ttk.Button(
-            btn_frame, text="🔊 プレビュー", command=self._preview_selected, width=12
+            btn_frame,
+            text="➕ 追加",
+            command=self._add_music,
+            width=12,
+            bootstyle="secondary-outline",
         ).pack(pady=2)
-        ttk.Button(btn_frame, text="⏹️ 停止", command=self._stop_preview, width=12).pack(
-            pady=2
-        )
+        ttk.Button(
+            btn_frame,
+            text="🗑️ 削除",
+            command=self._remove_music,
+            width=12,
+            bootstyle="secondary-outline",
+        ).pack(pady=2)
+        ttk.Button(
+            btn_frame,
+            text="⬆️ 上へ",
+            command=self._move_up,
+            width=12,
+            bootstyle="secondary-outline",
+        ).pack(pady=2)
+        ttk.Button(
+            btn_frame,
+            text="⬇️ 下へ",
+            command=self._move_down,
+            width=12,
+            bootstyle="secondary-outline",
+        ).pack(pady=2)
+        ttk.Button(
+            btn_frame,
+            text="🔊 プレビュー",
+            command=self._preview_selected,
+            width=12,
+            bootstyle="secondary-outline",
+        ).pack(pady=2)
+        ttk.Button(
+            btn_frame,
+            text="⏹️ 停止",
+            command=self._stop_preview,
+            width=12,
+            bootstyle="secondary-outline",
+        ).pack(pady=2)
 
         # インターバル設定フレーム
-        interval_frame = ttk.LabelFrame(
+        interval_frame = ttk.Labelframe(
             main_frame, text="⏱️ 曲間インターバル設定", padding="10"
         )
         interval_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
@@ -209,23 +228,29 @@ class MusicManagerWindow:
         self.info_label.pack(anchor="w")
 
         # 下部ボタンフレーム
-        bottom_frame = ttk.Frame(main_frame, style="MusicManager.TFrame")
+        bottom_frame = ttk.Frame(main_frame)
         bottom_frame.grid(row=4, column=0, sticky="ew")
 
         ttk.Button(
             bottom_frame,
             text="✅ 保存して閉じる",
             command=self._save_and_close,
-            style="Accent.TButton",
+            bootstyle="primary",
         ).pack(side="right", padx=(5, 0))
 
-        ttk.Button(bottom_frame, text="❌ キャンセル", command=self._on_close).pack(
-            side="right"
-        )
+        ttk.Button(
+            bottom_frame,
+            text="❌ キャンセル",
+            command=self._on_close,
+            bootstyle="secondary-outline",
+        ).pack(side="right")
 
-        ttk.Button(bottom_frame, text="🗑️ すべてクリア", command=self._clear_all).pack(
-            side="left"
-        )
+        ttk.Button(
+            bottom_frame,
+            text="🗑️ すべてクリア",
+            command=self._clear_all,
+            bootstyle="danger-outline",
+        ).pack(side="left")
 
     def _refresh_list(self):
         """リストボックスを更新"""
