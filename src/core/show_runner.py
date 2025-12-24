@@ -5,6 +5,7 @@
 import time
 import threading
 import traceback
+
 # coreパッケージの中から読み込むように修正
 from core.tello_controller import TelloController
 
@@ -240,34 +241,47 @@ def _execute_schedule(controllers, schedule, stop_event, log_queue, total_time):
     """スケジュールに従ってコマンドを実行"""
     start_time = time.time()
     all_event_times = sorted(list(set(evt["time"] for evt in schedule)))
+    last_highlight_time = -1.0
 
-    for exec_time in all_event_times:
-        if stop_event.is_set():
+    # ショー全体のループ
+    while not stop_event.is_set():
+        current_elapsed = time.time() - start_time
+
+        # 再生ヘッドの更新 (0.1秒おき)
+        if current_elapsed - last_highlight_time >= 0.1:
+            log_queue.put({"type": "highlight", "time": current_elapsed})
+            last_highlight_time = current_elapsed
+
+        # 次に実行すべきイベントがあるか確認
+        if all_event_times:
+            next_event_time = all_event_times[0]
+            if current_elapsed >= next_event_time:
+                exec_time = all_event_times.pop(0)
+
+                # UIで現在のステップをハイライト（厳密なイベント時刻で上書き）
+                log_queue.put({"type": "highlight", "time": exec_time})
+                log_queue.put(
+                    {
+                        "level": "INFO",
+                        "message": f"\n--- ステップ開始 ( {exec_time:.2f}秒地点 ) ---",
+                    }
+                )
+
+                # この時刻に実行するイベントを処理
+                if not _process_events(
+                    controllers, schedule, exec_time, stop_event, log_queue
+                ):
+                    break
+
+        # 全てのイベントが終了し、総時間も経過したか確認
+        if not all_event_times and current_elapsed >= total_time:
             break
 
-        # 次のイベントまで待機
-        wait_time = (start_time + exec_time) - time.time()
-        if wait_time > 0:
-            time.sleep(wait_time)
+        time.sleep(0.05)  # 短いスリープでループ
 
-        if stop_event.is_set():
-            break
-
-        # UIで現在のステップをハイライト
-        log_queue.put({"type": "highlight", "time": exec_time})
-        log_queue.put(
-            {
-                "level": "INFO",
-                "message": f"\n--- ステップ開始 ( {exec_time:.2f}秒地点 ) ---",
-            }
-        )
-
-        # この時刻に実行するイベントを処理
-        if not _process_events(controllers, schedule, exec_time, stop_event, log_queue):
-            break
-
-    # 最終待機時間
-    _wait_for_completion(start_time, total_time, stop_event, log_queue)
+    # 最終待機時間（もしあれば）
+    if not stop_event.is_set():
+        _wait_for_completion(start_time, total_time, stop_event, log_queue)
 
 
 def _process_events(controllers, schedule, exec_time, stop_event, log_queue):

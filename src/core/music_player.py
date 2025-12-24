@@ -4,6 +4,7 @@
 
 import threading
 import time
+import os
 
 try:
     import pygame
@@ -177,8 +178,6 @@ class MusicPlayer:
                         break
 
                     # ファイル名を取得
-                    import os
-
                     filename = os.path.basename(music_path)
 
                     try:
@@ -294,6 +293,31 @@ class MusicPlayer:
             self._log("INFO", f"音量を{int(volume * 100)}%に設定しました。")
         except Exception as e:
             self._log("ERROR", f"音量設定エラー: {e}")
+
+    def get_music_duration(self, music_path):
+        """
+        音楽ファイルの長さを取得（秒）
+
+        Args:
+            music_path: 音楽ファイルのパス
+        Returns:
+            float: 長さ（秒）。取得失敗時は0.0
+        """
+        if (
+            not self.pygame_available
+            or not music_path
+            or not os.path.exists(music_path)
+        ):
+            return 0.0
+
+        try:
+            sound = pygame.mixer.Sound(music_path)
+            return sound.get_length()
+        except Exception as e:
+            self._log(
+                "ERROR", f"音楽の長さ取得に失敗 ({os.path.basename(music_path)}): {e}"
+            )
+            return 0.0
 
 
 def is_pygame_available():

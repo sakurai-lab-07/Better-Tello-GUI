@@ -737,6 +737,7 @@ class ScratchProjectParser:
                 "type": "TAKEOFF",
                 "target": "システム",
                 "text": f"離陸シーケンス ({self.TAKEOFF_DURATION:.1f}秒)",
+                "duration": self.TAKEOFF_DURATION,
             }
         ]
         master_time = self.TAKEOFF_DURATION
@@ -816,6 +817,7 @@ class ScratchProjectParser:
                             "type": "WAIT",
                             "target": action["sprite_name"],
                             "text": f"{action['duration']:.2f}秒 待機",
+                            "duration": action["duration"],
                         }
                     )
                 for cmd in action.get("commands", []):
@@ -827,7 +829,12 @@ class ScratchProjectParser:
                     # タイムライン表示用テキストを追加
                     cmd_text = desc
                     cmd.update(
-                        {"time": master_time, "type": "COMMAND", "text": cmd_text}
+                        {
+                            "time": master_time,
+                            "type": "COMMAND",
+                            "text": cmd_text,
+                            "duration": action["duration"],
+                        }
                     )
                     final_event_list.append(cmd)
             master_time += max_duration_this_step
@@ -841,9 +848,10 @@ class ScratchProjectParser:
                 "target": "ALL",
                 "text": f"着陸 (対象: {', '.join(drones_with_actions)})",
                 "command": "land",
+                "duration": 5.0,  # 着陸動作の目安時間
             }
             final_event_list.append(land_event)
-            master_time = land_time  # 総時間も更新
+            master_time = land_time + 5.0  # 総時間も更新
         # ★★★ 修正ここまで ★★★
 
         final_event_list.sort(

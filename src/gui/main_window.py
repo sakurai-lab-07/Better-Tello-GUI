@@ -45,9 +45,11 @@ except ImportError:
 
 try:
     from .music_manager_window import MusicManagerWindow
+    from .timeline_window import TimelineViewerWindow
 except Exception:
     # fallback when running this file directly (not as a package)
     from music_manager_window import MusicManagerWindow
+    from timeline_window import TimelineViewerWindow
 
 
 class TelloApp:
@@ -88,6 +90,7 @@ class TelloApp:
         # 音楽管理
         self.music_player = MusicPlayer(self.log_queue)
         self.music_list = []
+        self.timeline_window = None
 
         # UI作成
         self._create_widgets()
@@ -484,12 +487,19 @@ class TelloApp:
     def open_timeline_viewer(self):
         if not self.schedule:
             return
-        TimelineViewerWindow(
+        if self.timeline_window and tk.Toplevel.winfo_exists(
+            self.timeline_window.window
+        ):
+            self.timeline_window.window.lift()
+            return
+
+        self.timeline_window = TimelineViewerWindow(
             self.master,
             self.music_list,
             self.schedule,
             self.total_time,
             self.music_player.get_interval(),
+            self.music_player,
         )
 
     def parse_scratch_project(self):
@@ -664,21 +674,48 @@ class TelloApp:
             self.master.after(100, self.process_log_queue)
 
     def update_timeline_highlight(self, t):
-        self.schedule_text.config(state="normal")
-        if self.last_highlighted_lines:
-            self.schedule_text.tag_remove(
-                "HIGHLIGHT",
-                f"{self.last_highlighted_lines['start']}.0",
-                f"{self.last_highlighted_lines['end']}.end",
-            )
-        if t is not None and t in self.time_to_line_map:
-            info = self.time_to_line_map[t]
+        # タイムラインウィンドウの再生ヘッド更新
+        if self.timeline_window and tk.Toplevel.winfo_exists(
+            self.timeline_window.window
+        ):
+            self.timeline_window.set_playhead(t)
+
+        if t is None:
+            self.schedule_text.config(state="normal")
+            if self.last_highlighted_lines:
+                self.schedule_text.tag_remove(
+                    "HIGHLIGHT",
+                    f"{self.last_highlighted_lines['start']}.0",
+                    f"{self.last_highlighted_lines['end']}.end",
+                )
+                self.last_highlighted_lines = None
+            self.schedule_text.config(state="disabled")
+            return
+
+        # テキストログのハイライトは、イベント時刻に一致する場合のみ更新
+        # 0.05秒程度の誤差を許容
+        matched_time = None
+        for event_time in self.time_to_line_map.keys():
+            if abs(event_time - t) < 0.05:
+                matched_time = event_time
+                break
+
+        if matched_time is not None:
+            self.schedule_text.config(state="normal")
+            if self.last_highlighted_lines:
+                self.schedule_text.tag_remove(
+                    "HIGHLIGHT",
+                    f"{self.last_highlighted_lines['start']}.0",
+                    f"{self.last_highlighted_lines['end']}.end",
+                )
+
+            info = self.time_to_line_map[matched_time]
             self.schedule_text.tag_add(
                 "HIGHLIGHT", f"{info['start']}.0", f"{info['end']}.end"
             )
             self.schedule_text.see(f"{info['start']}.0")
             self.last_highlighted_lines = info
-        self.schedule_text.config(state="disabled")
+            self.schedule_text.config(state="disabled")
 
     def on_closing(self):
         if self.show_thread and self.show_thread.is_alive():
