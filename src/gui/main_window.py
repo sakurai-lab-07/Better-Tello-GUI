@@ -4,6 +4,7 @@
 """
 
 import sys
+import os
 import json
 import threading
 import time
@@ -11,8 +12,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from queue import Queue
 
-# coreフォルダをパスに追加
-sys.path.append(".")
+# Ensure repository src root is on sys.path so running this file directly works
+src_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if src_root not in sys.path:
+    sys.path.insert(0, src_root)
 
 from config import (
     CONFIG_FILE,
@@ -40,8 +43,13 @@ try:
 except ImportError:
     NetworkManager = None
 
-from .music_manager_window import MusicManagerWindow
-from .timeline_viewer_window import TimelineViewerWindow
+try:
+    from .music_manager_window import MusicManagerWindow
+    from .timeline_viewer_window import TimelineViewerWindow
+except Exception:
+    # fallback when running this file directly (not as a package)
+    from music_manager_window import MusicManagerWindow
+    from timeline_viewer_window import TimelineViewerWindow
 
 
 class TelloApp:
