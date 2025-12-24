@@ -125,16 +125,67 @@ class TelloApp:
         main_frame.grid_rowconfigure(1, weight=1)
         main_frame.grid_columnconfigure(1, weight=1)
 
-        left_frame = ttk.Frame(main_frame)
-        left_frame.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
+        # --- 左カラム ---
+        left_container = ttk.Frame(main_frame)
+        left_container.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
 
-        # --- 設定・環境チェックボタン ---
+        # 設定ボタンを常駐（スクロール外）
         ttk.Button(
-            left_frame,
-            text="⚙️ 設定・環境チェック",
+            left_container,
+            text="⚙️",
             command=self.open_settings,
             bootstyle="secondary-outline",
-        ).pack(fill="x", pady=(0, 15))
+            width=3,
+        ).pack(anchor="nw", pady=(0, 10))
+
+        # スクロールバー付きのキャンバスを作成
+        # 幅を十分に広げ、スクロールバーとの干渉を完全に防ぐ
+        canvas = tk.Canvas(
+            left_container, width=520, highlightthickness=0, bg=COLOR_BACKGROUND
+        )
+        scrollbar = ttk.Scrollbar(
+            left_container, orient="vertical", command=canvas.yview
+        )
+
+        # スクロール可能なフレーム
+        # 右側に十分なパディングを追加し、横幅を確保
+        left_frame = ttk.Frame(canvas, padding=(0, 0, 30, 0))
+
+        # キャンバスの設定
+        canvas.create_window((0, 0), window=left_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # フレームのサイズが変わったときにスクロール領域を更新
+        def _on_frame_configure(event):
+            # コンテンツのサイズに合わせてスクロール領域を更新
+            bbox = canvas.bbox("all")
+            # (0, 0)から始まるように固定し、上方向や左方向への不要なスクロールを防止
+            canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
+
+            # コンテンツがキャンバスより小さい場合は位置をトップにリセット
+            if bbox[3] <= canvas.winfo_height():
+                canvas.yview_moveto(0)
+
+        left_frame.bind("<Configure>", _on_frame_configure)
+
+        # マウスホイールでスクロール（このエリアにマウスがある時のみ有効にする）
+        def _on_mousewheel(event):
+            # コンテンツがキャンバスより大きい場合のみスクロールを許可
+            bbox = canvas.bbox("all")
+            if bbox and bbox[3] > canvas.winfo_height():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
 
         # --- ① ドローン設定 ---
         ip_frame = ttk.Labelframe(
