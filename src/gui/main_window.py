@@ -47,10 +47,12 @@ except ImportError:
 try:
     from .music_manager_window import MusicManagerWindow
     from .timeline_window import TimelineViewerWindow
+    from .settings_window import SettingsWindow
 except Exception:
     # fallback when running this file directly (not as a package)
     from music_manager_window import MusicManagerWindow
     from timeline_window import TimelineViewerWindow
+    from settings_window import SettingsWindow
 
 
 class TelloApp:
@@ -59,8 +61,8 @@ class TelloApp:
     def __init__(self, master):
         self.master = master
         self.master.title("Tello Scratch ドローンショー・コントローラー")
-        self.master.geometry("1050x850")
-        self.master.minsize(900, 800)
+        self.master.geometry("1100x900")
+        self.master.minsize(1050, 850)
         self.master.configure(bg=COLOR_BACKGROUND)
 
         # フォント設定
@@ -125,6 +127,14 @@ class TelloApp:
 
         left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, rowspan=2, sticky="ns", padx=(0, 15))
+
+        # --- 設定・環境チェックボタン ---
+        ttk.Button(
+            left_frame,
+            text="⚙️ 設定・環境チェック",
+            command=self.open_settings,
+            bootstyle="secondary-outline",
+        ).pack(fill="x", pady=(0, 15))
 
         # --- ① ドローン設定 ---
         ip_frame = ttk.Labelframe(
@@ -478,6 +488,9 @@ class TelloApp:
         MusicManagerWindow(
             self.master, self.music_player, self.music_list, self.on_music_list_saved
         )
+
+    def open_settings(self):
+        SettingsWindow(self.master)
 
     def on_music_list_saved(self, new_list, interval):
         self.music_list = new_list
