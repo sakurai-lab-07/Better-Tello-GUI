@@ -49,7 +49,7 @@ class ConnectionStatusWindow(tk.Toplevel):
 
         ttk.Label(
             header_frame,
-            text="Tello 接続ステータス (Bento Grid)",
+            text="Tello 接続ステータス",
             font=("Yu Gothic UI", 16, "bold"),
         ).pack(side=LEFT)
 
@@ -67,22 +67,43 @@ class ConnectionStatusWindow(tk.Toplevel):
         )
         self.grid_frame = ttk.Frame(self.canvas)
 
-        self.canvas.create_window((0, 0), window=self.grid_frame, anchor=NW)
+        self.canvas_window = self.canvas.create_window(
+            (0, 0), window=self.grid_frame, anchor=NW
+        )
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        # キャンバスの幅に合わせて内部フレームの幅を調整
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
 
         self.canvas.pack(side=LEFT, fill=BOTH, expand=YES)
         self.scrollbar.pack(side=RIGHT, fill=Y)
 
-        self.grid_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
+        self.grid_frame.bind("<Configure>", self._on_frame_configure)
 
-        # マウスホイール対応
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        # マウスホイール対応 (マウスがキャンバス上にある時のみ有効化)
+        self.canvas.bind(
+            "<Enter>",
+            lambda _: self.canvas.bind_all("<MouseWheel>", self._on_mousewheel),
+        )
+        self.canvas.bind("<Leave>", lambda _: self.canvas.unbind_all("<MouseWheel>"))
+
+    def _on_canvas_configure(self, event):
+        # 内部フレームの幅をキャンバスの幅に合わせる
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+    def _on_frame_configure(self, event):
+        # コンテンツのサイズに合わせてスクロール領域を更新
+        bbox = self.canvas.bbox("all")
+        if bbox:
+            # (0, 0)から始まるように固定し、上方向への不要なスクロールを防止
+            self.canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
 
     def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if self.canvas.winfo_exists():
+            # コンテンツがキャンバスより大きい場合のみスクロールを許可
+            bbox = self.canvas.bbox("all")
+            if bbox and bbox[3] > self.canvas.winfo_height():
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def refresh_status(self):
         # 既存のカードを削除
