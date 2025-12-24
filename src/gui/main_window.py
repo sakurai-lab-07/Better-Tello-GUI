@@ -48,11 +48,13 @@ try:
     from .music_manager_window import MusicManagerWindow
     from .timeline_window import TimelineViewerWindow
     from .settings_window import SettingsWindow
+    from .connection_status_window import ConnectionStatusWindow
 except Exception:
     # fallback when running this file directly (not as a package)
     from music_manager_window import MusicManagerWindow
     from timeline_window import TimelineViewerWindow
     from settings_window import SettingsWindow
+    from connection_status_window import ConnectionStatusWindow
 
 
 class TelloApp:
@@ -94,6 +96,9 @@ class TelloApp:
         self.music_player = MusicPlayer(self.log_queue)
         self.music_list = []
         self.timeline_window = None
+
+        # ネットワーク管理
+        self.network_manager = NetworkManager() if NetworkManager else None
 
         # UI作成
         self._create_widgets()
@@ -202,40 +207,54 @@ class TelloApp:
         self.ip_entry_frame = ttk.Frame(ip_frame)
         self.ip_entry_frame.pack(fill="x")
 
-        ip_button_frame = ttk.Frame(ip_frame)
-        ip_button_frame.pack(fill="x", pady=(10, 5))
-
+        # --- ボタン群の再構成 (UI/UX向上) ---
+        # 1. リスト編集行: 追加・削除
+        edit_row = ttk.Frame(ip_frame)
+        edit_row.pack(fill="x", pady=(10, 2))
         ttk.Button(
-            ip_button_frame,
+            edit_row,
             text="＋ 追加",
             command=self.add_drone_entry,
             bootstyle="secondary-outline",
         ).pack(side="left", expand=True, fill="x", padx=(0, 2))
         ttk.Button(
-            ip_button_frame,
+            edit_row,
             text="－ 削除",
             command=self.remove_drone_entry,
             bootstyle="secondary-outline",
-        ).pack(side="left", expand=True, fill="x", padx=(2, 2))
-        ttk.Button(
-            ip_button_frame,
-            text="📡 Wi-Fi接続",
-            command=self.auto_connect_wifi,
-            bootstyle="secondary-outline",
-        ).pack(side="left", expand=True, fill="x", padx=(2, 2))
-        ttk.Button(
-            ip_button_frame,
-            text="🔍 IP検出",
-            command=self.auto_detect_drones,
-            bootstyle="secondary-outline",
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
+        # 2. ネットワーク行: 自動接続・検出
+        net_row = ttk.Frame(ip_frame)
+        net_row.pack(fill="x", pady=2)
         ttk.Button(
-            ip_frame,
-            text="⚙️ 設定を保存",
+            net_row,
+            text="📡 Wi-Fi接続",
+            command=self.auto_connect_wifi,
+            bootstyle="info-outline",
+        ).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(
+            net_row,
+            text="🔍 IP検出",
+            command=self.auto_detect_drones,
+            bootstyle="info-outline",
+        ).pack(side="left", expand=True, fill="x", padx=(2, 0))
+
+        # 3. 管理・保存行: ステータス確認・保存
+        action_row = ttk.Frame(ip_frame)
+        action_row.pack(fill="x", pady=(2, 0))
+        ttk.Button(
+            action_row,
+            text="📱 接続状況",
+            command=self.open_connection_status,
+            bootstyle="info",
+        ).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(
+            action_row,
+            text="💾 設定を保存",
             command=self.save_config,
-            bootstyle="secondary",
-        ).pack(fill="x", pady=(10, 0))
+            bootstyle="primary",
+        ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         # --- ② プロジェクト ---
         file_frame = ttk.Labelframe(left_frame, text="② プロジェクト", padding="10")
@@ -452,14 +471,17 @@ class TelloApp:
         threading.Thread(target=self._auto_connect_worker).start()
 
     def _auto_connect_worker(self):
-        nm = NetworkManager()
+        if not self.network_manager:
+            return
 
         def log_cb(msg):
             self.log({"level": "INFO", "message": msg})
 
         try:
             self.log({"level": "INFO", "message": "--- Wi-Fi自動接続プロセス開始 ---"})
-            connected_list = nm.connect_all_tellos(log_callback=log_cb)
+            connected_list = self.network_manager.connect_all_tellos(
+                log_callback=log_cb
+            )
             if connected_list:
                 self.log(
                     {
@@ -483,11 +505,10 @@ class TelloApp:
             self.log({"level": "ERROR", "message": f"Wi-Fi接続エラー: {e}"})
 
     def auto_detect_drones(self):
-        if NetworkManager is None:
+        if not self.network_manager:
             messagebox.showerror("エラー", "NetworkManagerがありません。")
             return
-        nm = NetworkManager()
-        found = nm.get_connected_tellos()
+        found = self.network_manager.get_connected_tellos()
         if not found:
             messagebox.showwarning("失敗", "Telloが見つかりません。")
             return
@@ -542,6 +563,13 @@ class TelloApp:
 
     def open_settings(self):
         SettingsWindow(self.master)
+
+    def open_connection_status(self):
+        # 現在のドローン設定を取得
+        drone_configs = {
+            w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets
+        }
+        ConnectionStatusWindow(self.master, self.network_manager, drone_configs)
 
     def on_music_list_saved(self, new_list, interval):
         self.music_list = new_list
