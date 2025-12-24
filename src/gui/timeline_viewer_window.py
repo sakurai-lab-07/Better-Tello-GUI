@@ -13,6 +13,9 @@ from tkinter import ttk
 from typing import List, Dict
 import re
 import os
+import wave
+import audioop
+import math as _math
 
 from config import (
     COLOR_BACKGROUND,
@@ -50,6 +53,8 @@ class TimelineViewerWindow:
         # layout
         self.left_width = 160
         self.track_height = 64
+        # music waveform track height (optional)
+        self.music_track_height = 96
         self.header_h = 48
         self.padding = 12
         self.px_per_s = 60
@@ -273,6 +278,9 @@ class TimelineViewerWindow:
         tracks = self.track_names
         num = max(1, len(tracks))
         height = self.header_h + num * self.track_height + self.padding * 2
+        has_music = bool(self.music_list)
+        if has_music:
+            height += self.music_track_height + 8
         self.canvas.config(scrollregion=(0, 0, self.left_width + width, height))
 
         # header background and time ticks
@@ -298,8 +306,17 @@ class TimelineViewerWindow:
                 fill="#555",
             )
 
-        # draw tracks and events
+        # draw music waveform track if present
         y0 = self.header_h + self.padding
+        if self.music_list:
+            try:
+                self._draw_music_waveform(y0)
+            except Exception:
+                # ensure music drawing errors don't prevent timeline from rendering
+                import traceback
+
+                traceback.print_exc()
+            y0 += self.music_track_height + 8
         self._flat_events = []
         for i, name in enumerate(tracks):
             ty = y0 + i * self.track_height
@@ -430,10 +447,209 @@ class TimelineViewerWindow:
                 pass
         return 1.0
 
-        self._update_zoom_label()
-        self._draw_timeline()
+    def _draw_music_waveform(self, y_top: int):
+        """Draw a simple waveform for the first music file across the timeline.
+
+        This attempts to open the first path in `self.music_list` as a WAV file and
+        computes per-segment RMS values to render a filled waveform. If the file
+        can't be read, a placeholder colored bar is drawn instead.
+        """
+        if not self.music_list:
+            return
+        music_path = self.music_list[0]
+        display_time = max(self.total_time, 1.0)
+        total_width = int(display_time * self.px_per_s)
+        x0 = self.left_width
+        x1 = self.left_width + total_width
+
+        # background
+        self.canvas.create_rectangle(
+            x0,
+            y_top,
+            x1,
+            y_top + self.music_track_height,
+            fill="#f8f8ff",
+            outline="#ddd",
+        )
+        label_x = 8
+        self.canvas.create_text(
+            label_x,
+            y_top + 12,
+            text="🎵 音楽 (波形)",
+            anchor="nw",
+            font=(self.FONT_FAMILY, max(10, self.FONT_SIZE)),
+            fill=COLOR_ACCENT,
+        )
+
+        try:
+            wf = wave.open(music_path, "rb")
+            nframes = wf.getnframes()
+            fr = wf.getframerate()
+            sampwidth = wf.getsampwidth()
+            nch = wf.getnchannels()
+            duration = nframes / float(fr) if fr else 0.0
+            # number of samples to render (cap for performance)
+            segments = min(max(80, int(total_width / 4)), 400)
+            frames_per_segment = max(1, int(nframes / segments))
+            rms_values = []
+            wf.rewind()
+            for i in range(segments):
+                frames = wf.readframes(frames_per_segment)
+                if not frames:
+                    break
+                # convert to mono RMS
+                if nch > 1:
+                    mono = audioop.tomono(frames, sampwidth, 0.5, 0.5)
+                else:
+                    mono = frames
+                try:
+                    rms = audioop.rms(mono, sampwidth)
+                except Exception:
+                    rms = 0
+                rms_values.append(rms)
+            wf.close()
+
+            if not rms_values:
+                raise RuntimeError("no audio data")
+
+            max_rms = max(rms_values) or 1
+            # build polygon points
+            seg_w = float(total_width) / len(rms_values)
+            points_top = []
+            points_bottom = []
+            mid = y_top + self.music_track_height / 2
+            amp_scale = (self.music_track_height / 2) * 0.9
+            for i, r in enumerate(rms_values):
+                cx = self.left_width + int(i * seg_w + seg_w / 2)
+                h = (r / float(max_rms)) * amp_scale
+                points_top.append((cx, mid - h))
+                points_bottom.append((cx, mid + h))
+
+            # combine polygon (top left->right then bottom right->left)
+            poly = []
+            for p in points_top:
+                poly.extend(p)
+            for p in reversed(points_bottom):
+                poly.extend(p)
+            self.canvas.create_polygon(poly, fill="#add8e6", outline="#5aa6c7")
+        except Exception:
+            # fallback: draw simple bar for each music file block proportional to duration
+            # try ffmpeg conversion to wav if available and input isn't wav
+            tmp_wav = None
+            try:
+                import shutil
+                import subprocess
+                import tempfile
+
+                if not music_path.lower().endswith(".wav") and shutil.which("ffmpeg"):
+                    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    tmp_wav = tf.name
+                    tf.close()
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        music_path,
+                        "-ar",
+                        "22050",
+                        "-ac",
+                        "1",
+                        tmp_wav,
+                    ]
+                    subprocess.run(
+                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    try:
+                        wf = wave.open(tmp_wav, "rb")
+                        # if successful, reuse logic by reading frames
+                        nframes = wf.getnframes()
+                        fr = wf.getframerate()
+                        sampwidth = wf.getsampwidth()
+                        nch = wf.getnchannels()
+                        duration = nframes / float(fr) if fr else 0.0
+                        segments = min(max(80, int(total_width / 4)), 400)
+                        frames_per_segment = max(1, int(nframes / segments))
+                        rms_values = []
+                        wf.rewind()
+                        for i in range(segments):
+                            frames = wf.readframes(frames_per_segment)
+                            if not frames:
+                                break
+                            mono = frames
+                            try:
+                                rms = audioop.rms(mono, sampwidth)
+                            except Exception:
+                                rms = 0
+                            rms_values.append(rms)
+                        wf.close()
+                        if rms_values:
+                            max_rms = max(rms_values) or 1
+                            seg_w = float(total_width) / len(rms_values)
+                            points_top = []
+                            points_bottom = []
+                            mid = y_top + self.music_track_height / 2
+                            amp_scale = (self.music_track_height / 2) * 0.9
+                            for i, r in enumerate(rms_values):
+                                cx = self.left_width + int(i * seg_w + seg_w / 2)
+                                h = (r / float(max_rms)) * amp_scale
+                                points_top.append((cx, mid - h))
+                                points_bottom.append((cx, mid + h))
+                            poly = []
+                            for p in points_top:
+                                poly.extend(p)
+                            for p in reversed(points_bottom):
+                                poly.extend(p)
+                            self.canvas.create_polygon(
+                                poly, fill="#add8e6", outline="#5aa6c7"
+                            )
+                            # cleanup temp
+                            try:
+                                os.unlink(tmp_wav)
+                            except Exception:
+                                pass
+                            return
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            if wf:
+                                wf.close()
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
+
+            block_w = max(4, int(total_width / max(1, len(self.music_list))))
+            cur = 0
+            for i, mp in enumerate(self.music_list):
+                bx0 = self.left_width + cur
+                bx1 = bx0 + block_w
+                self.canvas.create_rectangle(
+                    bx0,
+                    y_top + 8,
+                    bx1,
+                    y_top + self.music_track_height - 8,
+                    fill="#90EE90",
+                    outline="#2e8b57",
+                )
+                fname = os.path.basename(mp)
+                self.canvas.create_text(
+                    bx0 + 4,
+                    y_top + 10,
+                    text=(fname if len(fname) < 20 else fname[:17] + "..."),
+                    anchor="nw",
+                    font=(self.FONT_FAMILY, max(8, self.FONT_SIZE - 2)),
+                )
+                cur += block_w + 6
+
+        # no extra redraw here; caller (_draw) continues drawing tracks
+        return
 
     def _update_zoom_label(self):
         """ズームラベルを更新"""
-        zoom_percent = int((self.pixels_per_second / 50) * 100)
-        self.zoom_label.config(text=f"{zoom_percent}%")
+        try:
+            zoom_percent = int((self.px_per_s / 60) * 100)
+            self.zoom_label.config(text=f"{zoom_percent}%")
+        except Exception:
+            pass
