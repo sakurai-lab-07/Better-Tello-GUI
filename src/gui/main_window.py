@@ -259,6 +259,25 @@ class TelloApp:
         # --- ② プロジェクト ---
         file_frame = ttk.Labelframe(left_frame, text="② プロジェクト", padding="10")
         file_frame.pack(fill="x", pady=(0, 15))
+
+        # プロジェクト管理ボタン
+        proj_btn_frame = ttk.Frame(file_frame)
+        proj_btn_frame.pack(fill="x", pady=(0, 10))
+        ttk.Button(
+            proj_btn_frame,
+            text="📁 プロジェクトを開く",
+            command=self.load_project,
+            bootstyle="primary-outline",
+        ).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(
+            proj_btn_frame,
+            text="💾 プロジェクト保存",
+            command=self.save_project,
+            bootstyle="primary-outline",
+        ).pack(side="left", expand=True, fill="x", padx=(2, 0))
+
+        ttk.Separator(file_frame, orient="horizontal").pack(fill="x", pady=5)
+
         self.sb3_path_label = ttk.Label(
             file_frame, text="ファイル未選択", wraplength=230
         )
@@ -555,6 +574,88 @@ class TelloApp:
             self.sb3_path.set(path)
             self.sb3_path_label.configure(text=path.split("/")[-1])
             self._reset_ui_to_file_selected_state()
+
+    def save_project(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".tello",
+            filetypes=[("Tello Project", "*.tello")],
+            title="プロジェクトを保存",
+        )
+        if not path:
+            return
+
+        project_data = {
+            "sb3_path": self.sb3_path.get(),
+            "music_list": self.music_list,
+            "music_interval": self.music_player.get_interval(),
+            "drones": {
+                w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets
+            },
+        }
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(project_data, f, indent=4, ensure_ascii=False)
+            self.log(
+                {
+                    "level": "SUCCESS",
+                    "message": f"プロジェクトを保存しました: {os.path.basename(path)}",
+                }
+            )
+            messagebox.showinfo("成功", "プロジェクトを保存しました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"プロジェクトの保存に失敗しました: {e}")
+
+    def load_project(self):
+        path = filedialog.askopenfilename(
+            filetypes=[("Tello Project", "*.tello")], title="プロジェクトを開く"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # 1. Scratchファイルの復元
+            sb3 = data.get("sb3_path", "")
+            if sb3 and os.path.exists(sb3):
+                self.sb3_path.set(sb3)
+                self.sb3_path_label.configure(text=os.path.basename(sb3))
+                self._reset_ui_to_file_selected_state()
+                # 自動でタイムラインを解析
+                self.master.after(100, self.parse_scratch_project)
+            elif sb3:
+                self.log(
+                    {
+                        "level": "WARNING",
+                        "message": f"Scratchファイルが見つかりません: {sb3}",
+                    }
+                )
+
+            # 2. 音楽リストの復元
+            music_list = data.get("music_list", [])
+            interval = data.get("music_interval", 0.0)
+            self.on_music_list_saved(music_list, interval)
+
+            # 3. ドローン設定の復元
+            drones = data.get("drones", {})
+            if drones:
+                while self.drone_entry_widgets:
+                    self.remove_drone_entry()
+                for name, ip in drones.items():
+                    self.add_drone_entry(name=name, ip=ip)
+
+            self.log(
+                {
+                    "level": "SUCCESS",
+                    "message": f"プロジェクトを読み込みました: {os.path.basename(path)}",
+                }
+            )
+            messagebox.showinfo("成功", "プロジェクトを読み込みました。")
+
+        except Exception as e:
+            messagebox.showerror("エラー", f"プロジェクトの読み込みに失敗しました: {e}")
 
     def open_music_manager(self):
         MusicManagerWindow(
