@@ -13,6 +13,14 @@ try:
 except ImportError:
     PYGAME_AVAILABLE = False
 
+try:
+    import librosa
+    import numpy as np
+
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+
 
 class MusicPlayer:
     """音楽再生を管理するクラス"""
@@ -31,6 +39,9 @@ class MusicPlayer:
         self.is_playing = False
         self.stop_event = threading.Event()
         self.pygame_available = PYGAME_AVAILABLE
+        self._waveform_cache = {}  # 波形データのキャッシュ
+        self._loading_waveforms = set()  # 現在ロード中のパス
+        self._waveform_lock = threading.Lock()
 
         # pygameが利用可能な場合のみ初期化
         if self.pygame_available:
@@ -318,6 +329,88 @@ class MusicPlayer:
                 "ERROR", f"音楽の長さ取得に失敗 ({os.path.basename(music_path)}): {e}"
             )
             return 0.0
+
+    def get_waveform(self, music_path, num_points=500):
+        """
+        音楽ファイルの波形データを取得（キャッシュ付き）
+
+        Args:
+            music_path: 音楽ファイルのパス
+            num_points: 取得するポイント数
+        Returns:
+            list: 波形データのリスト（0.0〜1.0の範囲）。失敗時は空リスト
+        """
+        if (
+            not LIBROSA_AVAILABLE
+            or not music_path
+            or not os.path.exists(music_path)
+        ):
+            return []
+
+        # キャッシュキー（パスとポイント数）
+        cache_key = (music_path, num_points)
+        if cache_key in self._waveform_cache:
+            return self._waveform_cache[cache_key]
+
+        try:
+            # 非常に低いサンプリングレートで読み込む（高速化のため）
+            y, sr = librosa.load(music_path, sr=2000)
+
+            if len(y) > 0:
+                # 絶対値を取る
+                y_abs = np.abs(y)
+                # num_pointsに分割して各区間の最大値を取得
+                chunks = np.array_split(y_abs, num_points)
+                waveform = [
+                    float(np.max(chunk)) if len(chunk) > 0 else 0.0 for chunk in chunks
+                ]
+
+                # 正規化（最大値を1.0にする）
+                max_val = max(waveform) if waveform else 0
+                if max_val > 0:
+                    waveform = [v / max_val for v in waveform]
+
+                self._waveform_cache[cache_key] = waveform
+                return waveform
+        except Exception as e:
+            self._log("DEBUG", f"波形データの取得に失敗: {e}")
+
+        return []
+
+    def request_waveform(self, music_path, num_points=500, callback=None):
+        """
+        非同期で波形データをリクエストする
+
+        Args:
+            music_path: 音楽ファイルのパス
+            num_points: ポイント数
+            callback: 完了時に呼ばれる関数 callback(waveform)
+        """
+        # キャッシュにあれば即座にコールバック
+        cache_key = (music_path, num_points)
+        with self._waveform_lock:
+            if cache_key in self._waveform_cache:
+                if callback:
+                    callback(self._waveform_cache[cache_key])
+                return
+
+            # すでにロード中なら何もしない（コールバックは最初のスレッドに任せるか、今回は簡易化）
+            if music_path in self._loading_waveforms:
+                return
+            self._loading_waveforms.add(music_path)
+
+        def _load_thread():
+            try:
+                waveform = self.get_waveform(music_path, num_points)
+                if callback:
+                    callback(waveform)
+            finally:
+                with self._waveform_lock:
+                    if music_path in self._loading_waveforms:
+                        self._loading_waveforms.remove(music_path)
+
+        thread = threading.Thread(target=_load_thread, daemon=True)
+        thread.start()
 
 
 def is_pygame_available():

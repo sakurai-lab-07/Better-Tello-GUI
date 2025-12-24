@@ -312,12 +312,12 @@ class TimelineViewerWindow:
                 )
 
     def _draw_music_track(self, y_start, zoom):
-        """音楽のトラックを描画"""
+        """音楽のトラックを描画（波形付き）"""
         if not self.music_list:
             return
 
         y_mid = y_start + self.track_height / 2
-        h = 30
+        h = 40  # 波形の表示高さ
         current_time = 0.0
 
         for i, path in enumerate(self.music_list):
@@ -331,22 +331,55 @@ class TimelineViewerWindow:
             x_start = self.label_width + current_time * zoom
             x_end = x_start + duration * zoom
 
+            # 背景ボックス
             self.canvas.create_rectangle(
                 x_start,
-                y_mid - h / 2,
+                y_mid - 20,
                 x_end,
-                y_mid + h / 2,
+                y_mid + 20,
                 fill=COLOR_MUSIC,
                 outline="white",
                 width=1,
             )
 
+            # 波形の描画
+            if self.music_player:
+                # 描画幅に応じてポイント数を決定（1ピクセルあたり1ポイント程度）
+                draw_width = x_end - x_start
+                if draw_width > 10:
+                    num_points = int(draw_width)
+                    
+                    # キャッシュを確認
+                    cache_key = (path, num_points)
+                    waveform = self.music_player._waveform_cache.get(cache_key)
+                    
+                    if waveform:
+                        # 波形を線で描画
+                        for j, val in enumerate(waveform):
+                            px = x_start + j
+                            amp = val * 18
+                            if amp > 0.5:
+                                self.canvas.create_line(
+                                    px, y_mid - amp, px, y_mid + amp, 
+                                    fill="#e1bee7", width=1
+                                )
+                    else:
+                        # 非同期でリクエスト
+                        self.canvas.create_text(
+                            x_start + draw_width/2, y_mid,
+                            text="Loading waveform...", fill="white", font=(FONT_NORMAL[0], 7)
+                        )
+                        self.music_player.request_waveform(
+                            path, num_points, 
+                            callback=lambda _: self.window.after(0, self.draw_timeline)
+                        )
+
             filename = os.path.basename(path)
             self.canvas.create_text(
                 x_start + 5,
-                y_mid,
+                y_start + 5,
                 text=f"{i+1}: {filename}",
-                anchor="w",
+                anchor="nw",
                 fill="white",
                 font=(FONT_NORMAL[0], 8),
             )
@@ -359,9 +392,9 @@ class TimelineViewerWindow:
                 x_int_end = x_int_start + self.interval * zoom
                 self.canvas.create_rectangle(
                     x_int_start,
-                    y_mid - h / 4,
+                    y_mid - 10,
                     x_int_end,
-                    y_mid + h / 4,
+                    y_mid + 10,
                     fill="#e1bee7",
                     outline="white",
                     width=1,
