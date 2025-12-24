@@ -340,11 +340,7 @@ class MusicPlayer:
         Returns:
             list: 波形データのリスト（0.0〜1.0の範囲）。失敗時は空リスト
         """
-        if (
-            not LIBROSA_AVAILABLE
-            or not music_path
-            or not os.path.exists(music_path)
-        ):
+        if not LIBROSA_AVAILABLE or not music_path or not os.path.exists(music_path):
             return []
 
         # キャッシュキー（パスとポイント数）

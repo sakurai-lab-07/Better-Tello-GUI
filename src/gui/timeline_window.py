@@ -348,11 +348,11 @@ class TimelineViewerWindow:
                 draw_width = x_end - x_start
                 if draw_width > 10:
                     num_points = int(draw_width)
-                    
+
                     # キャッシュを確認
                     cache_key = (path, num_points)
                     waveform = self.music_player._waveform_cache.get(cache_key)
-                    
+
                     if waveform:
                         # 波形を線で描画
                         for j, val in enumerate(waveform):
@@ -360,18 +360,26 @@ class TimelineViewerWindow:
                             amp = val * 18
                             if amp > 0.5:
                                 self.canvas.create_line(
-                                    px, y_mid - amp, px, y_mid + amp, 
-                                    fill="#e1bee7", width=1
+                                    px,
+                                    y_mid - amp,
+                                    px,
+                                    y_mid + amp,
+                                    fill="#e1bee7",
+                                    width=1,
                                 )
                     else:
                         # 非同期でリクエスト
                         self.canvas.create_text(
-                            x_start + draw_width/2, y_mid,
-                            text="Loading waveform...", fill="white", font=(FONT_NORMAL[0], 7)
+                            x_start + draw_width / 2,
+                            y_mid,
+                            text="Loading waveform...",
+                            fill="white",
+                            font=(FONT_NORMAL[0], 7),
                         )
                         self.music_player.request_waveform(
-                            path, num_points, 
-                            callback=lambda _: self.window.after(0, self.draw_timeline)
+                            path,
+                            num_points,
+                            callback=lambda _: self.window.after(0, self.draw_timeline),
                         )
 
             filename = os.path.basename(path)
