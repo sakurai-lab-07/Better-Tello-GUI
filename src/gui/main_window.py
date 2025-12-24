@@ -45,11 +45,9 @@ except ImportError:
 
 try:
     from .music_manager_window import MusicManagerWindow
-    from .timeline_viewer_window import TimelineViewerWindow
 except Exception:
     # fallback when running this file directly (not as a package)
     from music_manager_window import MusicManagerWindow
-    from timeline_viewer_window import TimelineViewerWindow
 
 
 class TelloApp:
