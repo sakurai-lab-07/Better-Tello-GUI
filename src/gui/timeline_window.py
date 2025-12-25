@@ -331,13 +331,26 @@ class TimelineViewerWindow:
         h = 40  # 波形の表示高さ
         current_time = 0.0
 
-        for i, path in enumerate(self.music_list):
-            duration = 0.0
-            if self.music_player:
-                duration = self.music_player.get_music_duration(path)
+        for i, music_config in enumerate(self.music_list):
+            # 互換性のために文字列の場合は辞書に変換
+            if isinstance(music_config, str):
+                music_config = {"path": music_config, "start": 0.0, "end": 0.0}
 
-            if duration <= 0:
-                duration = 10.0  # デフォルト10秒（取得できない場合）
+            path = music_config["path"]
+            start_time = music_config.get("start", 0.0)
+            end_time = music_config.get("end", 0.0)
+
+            file_duration = 0.0
+            if self.music_player:
+                file_duration = self.music_player.get_music_duration(path)
+
+            # 実際の再生時間を計算
+            if end_time > 0:
+                duration = end_time - start_time
+            elif file_duration > 0:
+                duration = file_duration - start_time
+            else:
+                duration = 10.0  # デフォルト
 
             x_start = self.label_width + current_time * zoom
             x_end = x_start + duration * zoom
@@ -355,43 +368,56 @@ class TimelineViewerWindow:
 
             # 波形の描画
             if self.music_player:
-                # 描画幅に応じてポイント数を決定（キャッシュ効率のため固定値を使用）
+                # 描画幅に応じてポイント数を決定
                 draw_width = x_end - x_start
                 if draw_width > 10:
-                    # ズームレベルに関わらず一定の解像度で取得（キャッシュヒット率向上）
                     num_points = 1000
                     waveform = self.music_player._waveform_cache.get((path, num_points))
 
                     if waveform:
-                        # 波形を1つのポリゴンとして描画（劇的な高速化）
-                        points = []
-                        # 上半分
-                        for j, val in enumerate(waveform):
-                            px = x_start + (j / (len(waveform) - 1)) * draw_width
-                            points.extend([px, y_mid - val * 18])
-                        # 下半分（逆順）
-                        for j in range(len(waveform) - 1, -1, -1):
-                            val = waveform[j]
-                            px = x_start + (j / (len(waveform) - 1)) * draw_width
-                            points.extend([px, y_mid + val * 18])
-
-                        if len(points) >= 4:
-                            self.canvas.create_polygon(
-                                points,
-                                fill="#e1bee7",
-                                outline="#e1bee7",
-                                width=1,
-                                tags="waveform",
+                        # ファイル全体の波形から、選択範囲の部分を抽出
+                        if file_duration > 0:
+                            start_idx = int(
+                                (start_time / file_duration) * len(waveform)
                             )
+                            actual_end = end_time if end_time > 0 else file_duration
+                            end_idx = int((actual_end / file_duration) * len(waveform))
+                            # 範囲を制限
+                            start_idx = max(0, min(start_idx, len(waveform) - 1))
+                            end_idx = max(start_idx + 1, min(end_idx, len(waveform)))
+
+                            display_waveform = waveform[start_idx:end_idx]
+                        else:
+                            display_waveform = waveform
+
+                        if display_waveform:
+                            points = []
+                            # 上半分
+                            for j, val in enumerate(display_waveform):
+                                px = (
+                                    x_start
+                                    + (j / (len(display_waveform) - 1)) * draw_width
+                                )
+                                points.extend([px, y_mid - val * 18])
+                            # 下半分（逆順）
+                            for j in range(len(display_waveform) - 1, -1, -1):
+                                val = display_waveform[j]
+                                px = (
+                                    x_start
+                                    + (j / (len(display_waveform) - 1)) * draw_width
+                                )
+                                points.extend([px, y_mid + val * 18])
+
+                            if len(points) >= 4:
+                                self.canvas.create_polygon(
+                                    points,
+                                    fill="#e1bee7",
+                                    outline="#e1bee7",
+                                    width=1,
+                                    tags="waveform",
+                                )
                     else:
                         # 非同期でリクエスト
-                        self.canvas.create_text(
-                            x_start + draw_width / 2,
-                            y_mid,
-                            text="Loading waveform...",
-                            fill="white",
-                            font=(FONT_NORMAL[0], 7),
-                        )
                         self.music_player.request_waveform(
                             path,
                             num_points,

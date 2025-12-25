@@ -6,7 +6,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
 import os
+import threading
 
+from gui.music_range_editor import MusicRangeEditorWindow
 from config import (
     COLOR_BACKGROUND,
     COLOR_ACCENT,
@@ -61,6 +63,18 @@ class MusicManagerWindow:
 
         # 既存の音楽リストを表示
         self._refresh_list()
+
+        # 既存の曲の長さをバックグラウンドで取得
+        if self.music_list:
+
+            def _load_existing():
+                for item in self.music_list:
+                    # itemが辞書の場合はpathキーを使用
+                    path = item["path"] if isinstance(item, dict) else item
+                    self.music_player.get_music_duration(path)
+                self.window.after(0, self._refresh_list)
+
+            threading.Thread(target=_load_existing, daemon=True).start()
 
         # ウィンドウを中央に配置
         self.window.update_idletasks()
@@ -129,43 +143,85 @@ class MusicManagerWindow:
 
         # ボタンフレーム（リストの横）
         btn_frame = ttk.Frame(list_frame)
-        btn_frame.grid(row=0, column=2, sticky="ns", padx=(10, 0))
+        btn_frame.grid(row=0, column=2, sticky="ns", padx=(15, 0))
+
+        # --- リスト操作グループ ---
+        list_op_label = ttk.Label(
+            btn_frame, text="リスト操作", font=("Arial", 9, "bold")
+        )
+        list_op_label.pack(pady=(0, 5), anchor="w")
 
         ttk.Button(
             btn_frame,
             text="➕ 追加",
             command=self._add_music,
             width=12,
-            bootstyle="secondary-outline",
+            bootstyle="success",
         ).pack(pady=2)
+
         ttk.Button(
             btn_frame,
             text="🗑️ 削除",
             command=self._remove_music,
             width=12,
-            bootstyle="secondary-outline",
+            bootstyle="danger-outline",
         ).pack(pady=2)
+
         ttk.Button(
             btn_frame,
-            text="⬆️ 上へ",
+            text="🧹 クリア",
+            command=self._clear_all,
+            width=12,
+            bootstyle="danger-outline",
+        ).pack(pady=2)
+
+        # --- 並び替えグループ ---
+        ttk.Separator(btn_frame, orient="horizontal").pack(fill="x", pady=10)
+        order_label = ttk.Label(btn_frame, text="並び替え", font=("Arial", 9, "bold"))
+        order_label.pack(pady=(0, 5), anchor="w")
+
+        order_btn_frame = ttk.Frame(btn_frame)
+        order_btn_frame.pack(fill="x")
+
+        ttk.Button(
+            order_btn_frame,
+            text="⬆️",
             command=self._move_up,
-            width=12,
+            width=5,
             bootstyle="secondary-outline",
-        ).pack(pady=2)
+        ).pack(side="left", padx=(0, 2))
+
         ttk.Button(
-            btn_frame,
-            text="⬇️ 下へ",
+            order_btn_frame,
+            text="⬇️",
             command=self._move_down,
-            width=12,
+            width=5,
             bootstyle="secondary-outline",
-        ).pack(pady=2)
+        ).pack(side="left")
+
+        # --- プレビューグループ ---
+        ttk.Separator(btn_frame, orient="horizontal").pack(fill="x", pady=10)
+        preview_label = ttk.Label(
+            btn_frame, text="プレビュー", font=("Arial", 9, "bold")
+        )
+        preview_label.pack(pady=(0, 5), anchor="w")
+
         ttk.Button(
             btn_frame,
-            text="🔊 プレビュー",
+            text="🔊 再生",
             command=self._preview_selected,
             width=12,
-            bootstyle="secondary-outline",
+            bootstyle="info-outline",
         ).pack(pady=2)
+
+        ttk.Button(
+            btn_frame,
+            text="✂️ 範囲編集",
+            command=self._open_range_editor,
+            width=12,
+            bootstyle="warning-outline",
+        ).pack(pady=2)
+
         ttk.Button(
             btn_frame,
             text="⏹️ 停止",
@@ -198,8 +254,12 @@ class MusicManagerWindow:
             textvariable=self.interval_seconds,
             width=10,
             font=FONT_NORMAL,
+            command=self._refresh_list,  # 値が変わったらリスト（総時間）を更新
         )
         interval_spinbox.pack(side="left", padx=(10, 5))
+
+        # キー入力でも更新されるようにバインド
+        interval_spinbox.bind("<KeyRelease>", lambda e: self._refresh_list())
 
         ttk.Label(
             interval_inner,
@@ -229,41 +289,84 @@ class MusicManagerWindow:
 
         # 下部ボタンフレーム
         bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.grid(row=4, column=0, sticky="ew")
+        bottom_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
 
         ttk.Button(
             bottom_frame,
-            text="✅ 保存して閉じる",
+            text="✅ 設定を適用して保存",
             command=self._save_and_close,
             bootstyle="primary",
-        ).pack(side="right", padx=(5, 0))
+            padding=(20, 10),
+        ).pack(side="right", padx=(10, 0))
 
         ttk.Button(
             bottom_frame,
             text="❌ キャンセル",
             command=self._on_close,
             bootstyle="secondary-outline",
+            padding=(15, 10),
         ).pack(side="right")
-
-        ttk.Button(
-            bottom_frame,
-            text="🗑️ すべてクリア",
-            command=self._clear_all,
-            bootstyle="danger-outline",
-        ).pack(side="left")
 
     def _refresh_list(self):
         """リストボックスを更新"""
         self.listbox.delete(0, tk.END)
+        total_duration = 0.0
 
-        for i, music_path in enumerate(self.music_list, 1):
+        for i, music_config in enumerate(self.music_list, 1):
+            # 互換性のために文字列の場合は辞書に変換
+            if isinstance(music_config, str):
+                music_config = {"path": music_config, "start": 0.0, "end": 0.0}
+                self.music_list[i - 1] = music_config
+
+            music_path = music_config["path"]
+            start_time = music_config.get("start", 0.0)
+            end_time = music_config.get("end", 0.0)
+
             filename = os.path.basename(music_path)
-            self.listbox.insert(tk.END, f"{i}. {filename}")
+            # キャッシュからのみ取得（UIスレッドでのロードを避ける）
+            file_duration = self.music_player.get_music_duration(
+                music_path, fallback_to_load=False
+            )
+
+            # 編集後の長さを計算
+            if end_time > 0:
+                duration = end_time - start_time
+            elif file_duration > 0:
+                duration = file_duration - start_time
+            else:
+                duration = 0
+
+            total_duration += max(0, duration)
+
+            # 分:秒 形式に変換（未取得の場合は --:--）
+            if duration > 0:
+                min_sec = f"{int(duration // 60)}:{int(duration % 60):02d}"
+            else:
+                min_sec = "--:--"
+
+            range_str = ""
+            if start_time > 0 or end_time > 0:
+                if end_time > 0:
+                    actual_end_str = f"{end_time:.1f}s"
+                elif file_duration > 0:
+                    actual_end_str = f"{file_duration:.1f}s"
+                else:
+                    actual_end_str = "End"
+                range_str = f" ({start_time:.1f}s - {actual_end_str})"
+
+            self.listbox.insert(tk.END, f"{i}. [{min_sec}] {filename}{range_str}")
+
+        # インターバルを含めた総時間を計算
+        if len(self.music_list) > 1:
+            total_duration += (len(self.music_list) - 1) * self.interval_seconds.get()
 
         # 情報を更新
         if self.music_list:
+            total_min_sec = (
+                f"{int(total_duration // 60)}分{int(total_duration % 60):02d}秒"
+            )
             self.info_label.config(
-                text=f"合計 {len(self.music_list)} 曲が設定されています",
+                text=f"合計 {len(self.music_list)} 曲 | 総再生時間: 約 {total_min_sec}",
                 foreground=COLOR_SUCCESS,
             )
         else:
@@ -286,14 +389,26 @@ class MusicManagerWindow:
         )
 
         if paths:
+            # 追加されたファイルをリストに入れる
+            start_index = len(self.music_list)
             for path in paths:
-                self.music_list.append(path)
+                self.music_list.append({"path": path, "start": 0.0, "end": 0.0})
 
+            # とりあえずリストを更新（時間はまだ不明かもしれない）
             self._refresh_list()
+
+            # バックグラウンドで長さを取得して再更新
+            def _load_durations():
+                for path in paths:
+                    self.music_player.get_music_duration(path)
+                # すべて取得し終わったらメインスレッドでリフレッシュ
+                self.window.after(0, self._refresh_list)
+
+            threading.Thread(target=_load_durations, daemon=True).start()
 
             # 追加した最初のファイルを選択
             if len(self.music_list) > 0:
-                self.listbox.selection_set(len(self.music_list) - len(paths))
+                self.listbox.selection_set(start_index)
 
     def _remove_music(self):
         """選択中の音楽を削除"""
@@ -350,17 +465,23 @@ class MusicManagerWindow:
 
         index = selection[0]
         self.preview_index = index
+        music_config = self.music_list[index]
 
         # プレビュー再生（選択した曲のみ）
         self.music_player.stop()
 
         # 一時的に音楽リストをクリアして単一ファイルとして再生
-        self.music_player.set_music_list([])  # メドレーリストをクリア
-        self.music_player.set_music(self.music_list[index])  # 選択した曲を設定
-        self.music_player.play(delay=0)
+        # 注意: self.music_player.play() は self.music_list があるとメドレー再生してしまうため
+        # 直接 _play_single を呼ぶか、一時的にリストを空にする
+        self.music_player.set_music(music_config["path"], show_log=False)
+        self.music_player._play_single(
+            delay=0,
+            start_time=music_config.get("start", 0.0),
+            end_time=music_config.get("end", 0.0),
+        )
 
         # ステータス更新
-        filename = os.path.basename(self.music_list[index])
+        filename = os.path.basename(music_config["path"])
         self.info_label.config(
             text=f"🔊 プレビュー中: {filename}", foreground=COLOR_ACCENT
         )
@@ -370,8 +491,8 @@ class MusicManagerWindow:
         self.music_player.stop()
         self.preview_index = None
 
-        # 元の音楽リストを復元
-        self.music_player.set_music_list(self.original_music_list)
+        # 現在編集中の音楽リストをプレイヤーに反映
+        self.music_player.set_music_list(self.music_list)
 
         # ステータス更新
         if self.music_list:
@@ -395,6 +516,27 @@ class MusicManagerWindow:
             self.music_list.clear()
             self._refresh_list()
             self._stop_preview()
+
+    def _open_range_editor(self):
+        """範囲編集ウィンドウを開く"""
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "編集する音楽を選択してください")
+            return
+
+        # 編集ウィンドウを開く前に現在のプレビューを停止
+        self.music_player.stop()
+
+        index = selection[0]
+        music_config = self.music_list[index]
+
+        def on_save(new_config):
+            self.music_list[index] = new_config
+            self._refresh_list()
+            # プレイヤーにも即座に反映
+            self.music_player.set_music_list(self.music_list)
+
+        MusicRangeEditorWindow(self.window, self.music_player, music_config, on_save)
 
     def _save_and_close(self):
         """保存して閉じる"""

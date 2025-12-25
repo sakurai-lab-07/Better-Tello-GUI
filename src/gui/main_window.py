@@ -585,9 +585,12 @@ class TelloApp:
         if not path:
             return
 
+        # 音楽リストを確実に最新の状態にする
+        music_list = self.music_player.get_music_list()
+
         project_data = {
             "sb3_path": self.sb3_path.get(),
-            "music_list": self.music_list,
+            "music_list": music_list,
             "music_interval": self.music_player.get_interval(),
             "drones": {
                 w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets
@@ -675,11 +678,12 @@ class TelloApp:
         ConnectionStatusWindow(self.master, self.network_manager, drone_configs)
 
     def on_music_list_saved(self, new_list, interval):
-        self.music_list = new_list
         self.music_player.set_music_list(new_list)
+        # プレイヤー側で正規化（辞書形式に統一）されたリストを取得
+        self.music_list = self.music_player.get_music_list()
         self.music_player.set_interval(interval)
         self.music_info_label.config(
-            text=f"設定済み: {len(new_list)}曲", foreground=COLOR_SUCCESS
+            text=f"設定済み: {len(self.music_list)}曲", foreground=COLOR_SUCCESS
         )
 
     def open_timeline_viewer(self):
