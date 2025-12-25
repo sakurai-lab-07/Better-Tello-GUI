@@ -65,7 +65,6 @@ class TelloApp:
         self.master.title("Tello Scratch ドローンショー・コントローラー")
         self.master.geometry("1100x900")
         self.master.minsize(1050, 850)
-        self.master.configure(bg=COLOR_BACKGROUND)
 
         # フォント設定
         self.font_normal = FONT_NORMAL
@@ -96,6 +95,7 @@ class TelloApp:
         self.music_player = MusicPlayer(self.log_queue)
         self.music_list = []
         self.timeline_window = None
+        self.conn_status_window = None
 
         # トースト通知用の変数
         self._toast_frame = None
@@ -111,18 +111,31 @@ class TelloApp:
         self.process_log_queue()
         self._update_telemetry_loop()
 
+        # 初期テーマカラーの適用
+        self._update_theme_colors()
+
     def _configure_styles(self):
         # ttkbootstrapを使用しているため、テーマに基づいたスタイルが自動的に適用されます。
         # ここでは、アプリケーション固有のフォントやラベルのスタイルのみを微調整します。
         s = ttk.Style()
+        colors = s.colors
+
+        # デフォルトフォントの設定
+        s.configure(".", font=self.font_normal)
 
         # ヘッダーラベルのスタイル
         s.configure("Header.TLabel", font=self.font_header)
 
         # バッテリー状態のラベルスタイル
-        s.configure("BatteryOK.TLabel", foreground="green", font=self.font_header)
-        s.configure("BatteryLow.TLabel", foreground="red", font=self.font_header)
-        s.configure("BatteryOffline.TLabel", foreground="gray", font=self.font_normal)
+        s.configure(
+            "BatteryOK.TLabel", foreground=colors.success, font=self.font_header
+        )
+        s.configure(
+            "BatteryLow.TLabel", foreground=colors.danger, font=self.font_header
+        )
+        s.configure(
+            "BatteryOffline.TLabel", foreground=colors.secondary, font=self.font_normal
+        )
 
         # LabelFrameのタイトルフォント
         s.configure("TLabelframe.Label", font=self.font_bold_large)
@@ -148,52 +161,53 @@ class TelloApp:
 
         # スクロールバー付きのキャンバスを作成
         # 幅を十分に広げ、スクロールバーとの干渉を完全に防ぐ
-        canvas = tk.Canvas(
-            left_container, width=520, highlightthickness=0, bg=COLOR_BACKGROUND
-        )
+        self.left_canvas = tk.Canvas(left_container, width=520, highlightthickness=0)
+        # テーマに合わせて背景色を設定
+        self._update_theme_colors()
+
         scrollbar = ttk.Scrollbar(
-            left_container, orient="vertical", command=canvas.yview
+            left_container, orient="vertical", command=self.left_canvas.yview
         )
 
         # スクロール可能なフレーム
         # 右側に十分なパディングを追加し、横幅を確保
-        left_frame = ttk.Frame(canvas, padding=(0, 0, 30, 0))
+        left_frame = ttk.Frame(self.left_canvas, padding=(0, 0, 30, 0))
 
         # キャンバスの設定
-        canvas.create_window((0, 0), window=left_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.left_canvas.create_window((0, 0), window=left_frame, anchor="nw")
+        self.left_canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side="left", fill="both", expand=True)
+        self.left_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
         # フレームのサイズが変わったときにスクロール領域を更新
         def _on_frame_configure(event):
             # コンテンツのサイズに合わせてスクロール領域を更新
-            bbox = canvas.bbox("all")
+            bbox = self.left_canvas.bbox("all")
             # (0, 0)から始まるように固定し、上方向や左方向への不要なスクロールを防止
-            canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
+            self.left_canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
 
             # コンテンツがキャンバスより小さい場合は位置をトップにリセット
-            if bbox[3] <= canvas.winfo_height():
-                canvas.yview_moveto(0)
+            if bbox[3] <= self.left_canvas.winfo_height():
+                self.left_canvas.yview_moveto(0)
 
         left_frame.bind("<Configure>", _on_frame_configure)
 
         # マウスホイールでスクロール（このエリアにマウスがある時のみ有効にする）
         def _on_mousewheel(event):
             # コンテンツがキャンバスより大きい場合のみスクロールを許可
-            bbox = canvas.bbox("all")
-            if bbox and bbox[3] > canvas.winfo_height():
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            bbox = self.left_canvas.bbox("all")
+            if bbox and bbox[3] > self.left_canvas.winfo_height():
+                self.left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
         def _bind_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            self.left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         def _unbind_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
+            self.left_canvas.unbind_all("<MouseWheel>")
 
-        canvas.bind("<Enter>", _bind_mousewheel)
-        canvas.bind("<Leave>", _unbind_mousewheel)
+        self.left_canvas.bind("<Enter>", _bind_mousewheel)
+        self.left_canvas.bind("<Leave>", _unbind_mousewheel)
 
         # --- ① ドローン設定 ---
         ip_frame = ttk.Labelframe(
@@ -218,13 +232,13 @@ class TelloApp:
             edit_row,
             text="＋ 追加",
             command=self.add_drone_entry,
-            bootstyle="secondary-outline",
+            bootstyle="success",
         ).pack(side="left", expand=True, fill="x", padx=(0, 2))
         ttk.Button(
             edit_row,
             text="－ 削除",
             command=self.remove_drone_entry,
-            bootstyle="secondary-outline",
+            bootstyle="danger-outline",
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         # 2. ネットワーク行: 自動接続・検出
@@ -234,13 +248,13 @@ class TelloApp:
             net_row,
             text="📡 Wi-Fi接続",
             command=self.auto_connect_wifi,
-            bootstyle="info-outline",
+            bootstyle="info",
         ).pack(side="left", expand=True, fill="x", padx=(0, 2))
         ttk.Button(
             net_row,
             text="🔍 IP検出",
             command=self.auto_detect_drones,
-            bootstyle="info-outline",
+            bootstyle="info",
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         # 3. 管理・保存行: ステータス確認・保存
@@ -270,13 +284,13 @@ class TelloApp:
             proj_btn_frame,
             text="📁 プロジェクトを開く",
             command=self.load_project,
-            bootstyle="primary-outline",
+            bootstyle="primary",
         ).pack(side="left", expand=True, fill="x", padx=(0, 2))
         ttk.Button(
             proj_btn_frame,
             text="💾 プロジェクト保存",
             command=self.save_project,
-            bootstyle="primary-outline",
+            bootstyle="primary",
         ).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
         ttk.Separator(file_frame, orient="horizontal").pack(fill="x", pady=5)
@@ -289,14 +303,14 @@ class TelloApp:
             file_frame,
             text="📂 Scratchファイルを開く",
             command=self.select_file,
-            bootstyle="secondary-outline",
+            bootstyle="primary-outline",
         ).pack(fill="x", pady=(0, 5))
         self.parse_btn = ttk.Button(
             file_frame,
             text="🔄 タイムラインを解析",
             command=self.parse_scratch_project,
             state="disabled",
-            bootstyle="secondary-outline",
+            bootstyle="success-outline",
         )
         self.parse_btn.pack(fill="x")
 
@@ -313,14 +327,14 @@ class TelloApp:
             btn_grid,
             text="🎵 音楽管理",
             command=self.open_music_manager,
-            bootstyle="secondary-outline",
+            bootstyle="info",
         ).pack(side="left", fill="x", expand=True, padx=(0, 2))
         self.timeline_btn = ttk.Button(
             btn_grid,
             text="📊 タイムライン",
             command=self.open_timeline_viewer,
             state="disabled",
-            bootstyle="secondary-outline",
+            bootstyle="info-outline",
         )
         self.timeline_btn.pack(side="left", fill="x", expand=True, padx=(2, 0))
 
@@ -399,25 +413,32 @@ class TelloApp:
         self._configure_text_tags()
 
     def _configure_text_tags(self):
-        self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("SUCCESS", foreground=COLOR_SUCCESS)
-        self.log_text.tag_config("WARNING", foreground=COLOR_WARNING)
-        self.log_text.tag_config("ERROR", foreground=COLOR_ERROR)
+        colors = self.master.style.colors
+
+        # ログテキストのタグ
+        self.log_text.tag_config("INFO", foreground=colors.fg)
+        self.log_text.tag_config("SUCCESS", foreground=colors.success)
+        self.log_text.tag_config("WARNING", foreground=colors.warning)
+        self.log_text.tag_config("ERROR", foreground=colors.danger)
+
+        # スケジュールテキストのタグ
         self.schedule_text.tag_config(
             "TAKEOFF",
-            foreground=COLOR_SUCCESS,
+            foreground=colors.success,
             font=(self.font_monospace[0], self.font_monospace[1], "bold"),
         )
-        self.schedule_text.tag_config("INFO", foreground="black")
-        self.schedule_text.tag_config("WAIT", foreground="blue")
-        self.schedule_text.tag_config("WARNING", foreground=COLOR_ERROR)
+        self.schedule_text.tag_config("INFO", foreground=colors.fg)
+        self.schedule_text.tag_config("WAIT", foreground=colors.info)
+        self.schedule_text.tag_config("WARNING", foreground=colors.warning)
         self.schedule_text.tag_config(
-            "HEADER", foreground=COLOR_ACCENT, font=self.font_header
+            "HEADER", foreground=colors.primary, font=self.font_header
         )
-        self.schedule_text.tag_config("HIGHLIGHT", background=COLOR_HIGHLIGHT)
+        self.schedule_text.tag_config(
+            "HIGHLIGHT", background=colors.selectbg, foreground=colors.selectfg
+        )
         self.schedule_text.tag_config(
             "LAND",
-            foreground=COLOR_STOP,
+            foreground=colors.danger,
             font=(self.font_monospace[0], self.font_monospace[1], "bold"),
         )
 
@@ -550,9 +571,18 @@ class TelloApp:
         try:
             with open(CONFIG_FILE, "r") as f:
                 config = json.load(f)
+
+            # テーマ設定の読み込み
+            theme = config.get("app_theme", "cosmo")
+            self.master.style.theme_use(theme)
+
             while self.drone_entry_widgets:
                 self.remove_drone_entry()
+
+            # ドローン設定のみを抽出
             for name, ip in config.items():
+                if name == "app_theme":
+                    continue
                 self.add_drone_entry(name=name, ip=ip)
             self.log({"level": "INFO", "message": "設定読み込み完了"})
         except:
@@ -561,6 +591,9 @@ class TelloApp:
 
     def save_config(self):
         data = {w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets}
+        # テーマ設定も保存
+        data["app_theme"] = self.master.style.theme_name
+
         try:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(data, f, indent=4)
@@ -568,6 +601,57 @@ class TelloApp:
             self.show_toast("✅ 設定を保存しました")
         except Exception as e:
             messagebox.showerror("エラー", f"保存失敗: {e}")
+
+    def change_theme(self, theme_name):
+        """テーマを変更して保存"""
+        self.master.style.theme_use(theme_name)
+        self._update_theme_colors()
+
+        # タイムラインウィンドウが開いていれば更新
+        if self.timeline_window and tk.Toplevel.winfo_exists(
+            self.timeline_window.window
+        ):
+            self.timeline_window.update_theme_colors()
+
+        # 接続ステータスウィンドウが開いていれば更新
+        if self.conn_status_window and tk.Toplevel.winfo_exists(
+            self.conn_status_window
+        ):
+            self.conn_status_window.update_theme_colors()
+
+        self.save_config()
+
+    def _update_theme_colors(self):
+        """テーマに合わせて非ttkウィジェットの色を更新"""
+        style = self.master.style
+        colors = style.colors
+
+        # Canvasの背景色
+        if hasattr(self, "left_canvas"):
+            self.left_canvas.configure(bg=colors.bg)
+
+        # テキストウィジェットの色
+        widgets = []
+        if hasattr(self, "log_text"):
+            widgets.append(self.log_text)
+        if hasattr(self, "schedule_text"):
+            widgets.append(self.schedule_text)
+
+        for text_widget in widgets:
+            text_widget.configure(
+                bg=colors.inputbg,
+                fg=colors.inputfg,
+                insertbackground=colors.inputfg,  # カーソルの色
+                selectbackground=colors.selectbg,
+                selectforeground=colors.selectfg,
+            )
+
+        # タグの再設定
+        if hasattr(self, "log_text") and hasattr(self, "schedule_text"):
+            self._configure_text_tags()
+
+        # バッテリー状態のスタイルも再設定（テーマ変更時にリセットされる場合があるため）
+        self._configure_styles()
 
     def select_file(self):
         path = filedialog.askopenfilename(filetypes=[("Scratch Project", "*.sb3")])
@@ -668,14 +752,16 @@ class TelloApp:
         )
 
     def open_settings(self):
-        SettingsWindow(self.master)
+        SettingsWindow(self.master, self)
 
     def open_connection_status(self):
         # 現在のドローン設定を取得
         drone_configs = {
             w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets
         }
-        ConnectionStatusWindow(self.master, self.network_manager, drone_configs)
+        self.conn_status_window = ConnectionStatusWindow(
+            self.master, self.network_manager, drone_configs
+        )
 
     def on_music_list_saved(self, new_list, interval):
         self.music_player.set_music_list(new_list)

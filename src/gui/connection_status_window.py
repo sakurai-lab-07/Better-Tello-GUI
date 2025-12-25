@@ -7,7 +7,7 @@ import threading
 import time
 
 
-class ConnectionStatusWindow(tk.Toplevel):
+class ConnectionStatusWindow(ttk.Toplevel):
     def __init__(self, parent, network_manager, drone_configs):
         super().__init__(parent)
         self.title("Tello 接続ステータス")
@@ -22,7 +22,6 @@ class ConnectionStatusWindow(tk.Toplevel):
         self._load_image()
 
         self._create_widgets()
-        self.refresh_status()
 
     def _load_image(self):
         try:
@@ -59,9 +58,8 @@ class ConnectionStatusWindow(tk.Toplevel):
         self.refresh_btn.pack(side=RIGHT)
 
         # グリッドコンテナ (スクロール可能にする)
-        self.canvas = tk.Canvas(
-            self.main_frame, highlightthickness=0, bg=self.cget("bg")
-        )
+        colors = self.style.colors
+        self.canvas = tk.Canvas(self.main_frame, highlightthickness=0, bg=colors.bg)
         self.scrollbar = ttk.Scrollbar(
             self.main_frame, orient=VERTICAL, command=self.canvas.yview
         )
@@ -79,6 +77,9 @@ class ConnectionStatusWindow(tk.Toplevel):
         self.scrollbar.pack(side=RIGHT, fill=Y)
 
         self.grid_frame.bind("<Configure>", self._on_frame_configure)
+
+        # 初期表示
+        self.after(100, self.refresh_status)
 
         # マウスホイール対応 (マウスがキャンバス上にある時のみ有効化)
         self.canvas.bind(
@@ -98,6 +99,13 @@ class ConnectionStatusWindow(tk.Toplevel):
             # (0, 0)から始まるように固定し、上方向への不要なスクロールを防止
             self.canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
 
+    def update_theme_colors(self):
+        """テーマ変更時にCanvasの色を更新"""
+        if not self.winfo_exists():
+            return
+        colors = self.style.colors
+        self.canvas.config(bg=colors.bg)
+
     def _on_mousewheel(self, event):
         if self.canvas.winfo_exists():
             # コンテンツがキャンバスより大きい場合のみスクロールを許可
@@ -116,11 +124,10 @@ class ConnectionStatusWindow(tk.Toplevel):
         else:
             connected_tellos = []
 
-        # 設定されているドローン一覧
-        # drone_configs: {name: ip}
-
         # 表示用のデータを整理
         display_data = []
+
+        # 1. 設定されているドローンをベースにする
         for name, target_ip in self.drone_configs.items():
             # このドローンが現在接続されているか確認
             connection = next(
@@ -137,8 +144,29 @@ class ConnectionStatusWindow(tk.Toplevel):
                 }
             )
 
+        # 2. 設定にはないが接続されているTelloがあれば追加
+        for conn in connected_tellos:
+            if not any(d["target_ip"] == conn["ip"] for d in display_data):
+                display_data.append(
+                    {
+                        "name": f"未登録 ({conn['ip']})",
+                        "target_ip": conn["ip"],
+                        "ssid": conn["ssid"],
+                        "interface": conn["interface"],
+                        "connected": True,
+                    }
+                )
+
+        if not display_data:
+            ttk.Label(
+                self.grid_frame,
+                text="表示するドローンがありません。\nメイン画面でドローンを追加してください。",
+                font=("Yu Gothic UI", 12),
+                padding=50,
+            ).pack()
+            return
+
         # Bentoグリッド風に配置
-        # ドローンの数に応じて列数を調整
         num_drones = len(display_data)
         if num_drones <= 1:
             cols = 1
@@ -158,23 +186,20 @@ class ConnectionStatusWindow(tk.Toplevel):
 
     def _create_card(self, parent, data, row, col):
         # カードのスタイル
-        # Bentoグリッド風に、インデックスによってサイズを変える（オプション）
-        # ここではシンプルに、モダンなカードデザインを追求
-
         card_frame = ttk.Frame(parent, padding=5)
         card_frame.grid(row=row, column=col, padx=10, pady=10, sticky=NSEW)
 
-        # 外枠（影の代わり）
-        outer_style = LIGHT if not data["connected"] else SUCCESS
+        # 外枠
+        outer_style = SUCCESS if data["connected"] else SECONDARY
         outer = ttk.Frame(card_frame, bootstyle=outer_style, padding=2)
         outer.pack(fill=BOTH, expand=YES)
 
         # メインコンテンツ
-        inner = ttk.Frame(outer, padding=20, bootstyle=LIGHT)
+        inner = ttk.Frame(outer, padding=20)
         inner.pack(fill=BOTH, expand=YES)
 
-        # ステータスバッジ (右上に配置したいが、packなので上に)
-        status_frame = ttk.Frame(inner, bootstyle=LIGHT)
+        # ステータスバッジ
+        status_frame = ttk.Frame(inner)
         status_frame.pack(fill=X)
 
         status_text = "● ONLINE" if data["connected"] else "○ OFFLINE"
@@ -182,28 +207,26 @@ class ConnectionStatusWindow(tk.Toplevel):
         ttk.Label(
             status_frame,
             text=status_text,
-            font=("Yu Gothic UI", 9, "bold"),
+            font=("Yu Gothic UI", 10, "bold"),
             bootstyle=status_color,
         ).pack(side=RIGHT)
 
         # 画像
         if self.tello_photo:
-            img_label = ttk.Label(inner, image=self.tello_photo, bootstyle=LIGHT)
+            img_label = ttk.Label(inner, image=self.tello_photo)
             img_label.pack(pady=10)
         else:
             ttk.Label(
                 inner,
                 text="[ Tello Image ]",
-                font=("Yu Gothic UI", 10, "italic"),
+                font=("Yu Gothic UI", 11, "italic"),
                 bootstyle=SECONDARY,
             ).pack(pady=20)
 
         # テキスト情報
-        ttk.Label(
-            inner, text=data["name"], font=("Yu Gothic UI", 14, "bold"), bootstyle=DARK
-        ).pack()
+        ttk.Label(inner, text=data["name"], font=("Yu Gothic UI", 14, "bold")).pack()
 
-        info_frame = ttk.Frame(inner, bootstyle=LIGHT, padding=(0, 10, 0, 0))
+        info_frame = ttk.Frame(inner, padding=(0, 10, 0, 0))
         info_frame.pack(fill=X)
 
         # ラベルと値のペア
@@ -212,14 +235,12 @@ class ConnectionStatusWindow(tk.Toplevel):
         self._add_info_row(info_frame, "Interface:", data["interface"])
 
     def _add_info_row(self, parent, label, value):
-        row = ttk.Frame(parent, bootstyle=LIGHT)
+        row = ttk.Frame(parent)
         row.pack(fill=X, pady=2)
         ttk.Label(
-            row, text=label, font=("Yu Gothic UI", 9), bootstyle=SECONDARY, width=12
+            row, text=label, font=("Yu Gothic UI", 10), bootstyle=SECONDARY, width=12
         ).pack(side=LEFT)
-        ttk.Label(row, text=value, font=("Consolas", 10), bootstyle=DARK).pack(
-            side=LEFT
-        )
+        ttk.Label(row, text=value, font=("Consolas", 11)).pack(side=LEFT)
 
 
 if __name__ == "__main__":

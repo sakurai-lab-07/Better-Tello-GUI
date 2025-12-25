@@ -31,12 +31,12 @@ PC_PORT_BASE = 9000
 # -----------------------------------------------------------------------------
 # GUIスタイル設定
 # -----------------------------------------------------------------------------
-FONT_NORMAL = ("Yu Gothic UI", 10)
-FONT_BOLD_LARGE = ("Yu Gothic UI", 12, "bold")
-FONT_HEADER = ("Yu Gothic UI", 10, "bold")
-FONT_MONOSPACE = ("Consolas", 10)
+FONT_NORMAL = ("Yu Gothic UI", 11)
+FONT_BOLD_LARGE = ("Yu Gothic UI", 14, "bold")
+FONT_HEADER = ("Yu Gothic UI", 11, "bold")
+FONT_MONOSPACE = ("Consolas", 11)
 
-# 色設定
+# 色設定 (これらはフォールバック用。可能な限りテーマカラーを使用する)
 COLOR_BACKGROUND = "#f0f0f0"
 COLOR_ACCENT = "#0078D7"
 COLOR_ACCENT_HOVER = "#005f9e"

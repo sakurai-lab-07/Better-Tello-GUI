@@ -58,7 +58,6 @@ class TimelineViewerWindow:
         self.window.title("タイムラインビューワー")
         self.window.geometry("1000x600")
         self.window.minsize(800, 400)
-        self.window.configure(bg=COLOR_BACKGROUND)
 
         # ズーム倍率 (pixels per second)
         self.zoom_level = tk.DoubleVar(value=20.0)
@@ -113,7 +112,8 @@ class TimelineViewerWindow:
         container = ttk.Frame(self.window)
         container.pack(fill="both", expand=True)
 
-        self.canvas = tk.Canvas(container, bg=COLOR_TIMELINE_BG, highlightthickness=0)
+        colors = self.window.style.colors
+        self.canvas = tk.Canvas(container, bg=colors.inputbg, highlightthickness=0)
 
         self.h_scroll = ttk.Scrollbar(
             container, orient="horizontal", command=self.canvas.xview
@@ -188,6 +188,14 @@ class TimelineViewerWindow:
             self.window.after_cancel(self._draw_timer)
         self._draw_timer = self.window.after(20, self.draw_timeline)
 
+    def update_theme_colors(self):
+        """テーマ変更時にCanvasの色を更新"""
+        if not self.window.winfo_exists():
+            return
+        colors = self.window.style.colors
+        self.canvas.config(bg=colors.bg)
+        self.draw_timeline()
+
     def draw_timeline(self):
         """タイムラインを描画"""
         self.canvas.delete("all")
@@ -233,10 +241,15 @@ class TimelineViewerWindow:
         self.canvas.configure(scrollregion=(0, 0, total_width, total_height))
 
         # 時間軸の描画
+        colors = self.window.style.colors
         for t in range(0, int(display_total_time) + 10, 5):
             x = self.label_width + t * zoom
-            self.canvas.create_line(x, 0, x, total_height, fill="#cccccc", dash=(2, 4))
-            self.canvas.create_text(x, 10, text=f"{t}s", anchor="n", font=FONT_NORMAL)
+            self.canvas.create_line(
+                x, 0, x, total_height, fill=colors.border, dash=(2, 4)
+            )
+            self.canvas.create_text(
+                x, 10, text=f"{t}s", anchor="n", font=FONT_NORMAL, fill=colors.fg
+            )
 
         # トラックの描画
         for i, track in enumerate(tracks):
@@ -245,7 +258,7 @@ class TimelineViewerWindow:
 
             # トラック背景
             self.canvas.create_rectangle(
-                0, y_start, total_width, y_end, fill="white", outline="#dddddd"
+                0, y_start, total_width, y_end, fill=colors.bg, outline=colors.border
             )
 
             # トラックラベル
@@ -254,14 +267,15 @@ class TimelineViewerWindow:
                 y_start,
                 self.label_width,
                 y_end,
-                fill=COLOR_TRACK_LABEL_BG,
-                outline="#dddddd",
+                fill=colors.secondary,
+                outline=colors.border,
             )
             self.canvas.create_text(
                 self.label_width / 2,
                 y_start + self.track_height / 2,
                 text=track,
                 font=FONT_BOLD_LARGE,
+                fill=colors.fg,
             )
 
             if track == "音楽":

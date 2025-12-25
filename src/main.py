@@ -29,12 +29,24 @@ if sys.platform == "win32":
 
 # GUI起動
 from gui import TelloApp
+from config import CONFIG_FILE
+import json
 
 
 def main():
     """アプリケーションのメイン関数"""
+    # 設定ファイルからテーマを読み込む
+    theme = "cosmo"
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                theme = config.get("app_theme", "cosmo")
+        except:
+            pass
+
     # ttkbootstrapのWindowを使用（テーマを指定可能）
-    root = tb.Window(themename="cosmo")
+    root = tb.Window(themename=theme)
     app = TelloApp(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()

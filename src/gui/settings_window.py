@@ -9,17 +9,20 @@ import importlib.util
 import subprocess
 import sys
 import threading
+from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 
 class SettingsWindow:
     """設定・環境チェックウィンドウクラス"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, app_instance=None):
         self.parent = parent
+        self.app_instance = app_instance
         self.window = ttk.Toplevel(parent)
         self.window.title("設定・環境チェック")
-        self.window.geometry("500x600")
-        self.window.minsize(400, 500)
+        # ウィンドウサイズの設定
+        self.window.geometry("500x650")
+        self.window.minsize(450, 550)
 
         # 必要なパッケージリスト
         self.required_packages = {
@@ -32,22 +35,62 @@ class SettingsWindow:
         self.package_status = {}
 
         self._create_widgets()
-        self.check_environment()
+
+        # UIの描画を強制
+        self.window.update()
+        self.window.lift()
+        self.window.focus_force()
 
     def _create_widgets(self):
+        # メインフレーム
         main_frame = ttk.Frame(self.window, padding=20)
         main_frame.pack(fill=BOTH, expand=YES)
 
-        # タイトル
+        # --- 外観設定 ---
+        ttk.Label(main_frame, text="外観設定", font=("Yu Gothic UI", 12, "bold")).pack(
+            anchor=W, pady=(10, 10)
+        )
+
+        theme_frame = ttk.Labelframe(main_frame, text="テーマ設定", padding=10)
+        theme_frame.pack(fill=X, pady=(0, 20), padx=20)
+
+        # テーマ名の取得を安全にする
+        current_theme = "cosmo"
+        try:
+            current_theme = self.parent.style.theme_name
+        except:
+            pass
+
+        self.theme_var = tk.StringVar(value=current_theme)
+
+        light_radio = ttk.Radiobutton(
+            theme_frame,
+            text="ライトモード (cosmo)",
+            variable=self.theme_var,
+            value="cosmo",
+            command=self._on_theme_change,
+        )
+        light_radio.pack(side=LEFT, padx=20)
+
+        dark_radio = ttk.Radiobutton(
+            theme_frame,
+            text="ダークモード (darkly)",
+            variable=self.theme_var,
+            value="darkly",
+            command=self._on_theme_change,
+        )
+        dark_radio.pack(side=LEFT, padx=20)
+
+        # --- 環境チェック ---
         ttk.Label(
-            main_frame, text="環境チェック", font=("Yu Gothic UI", 14, "bold")
-        ).pack(anchor=W, pady=(0, 10))
+            main_frame, text="環境チェック", font=("Yu Gothic UI", 12, "bold")
+        ).pack(anchor=W, pady=(0, 10), padx=20)
 
         # パッケージリスト用フレーム
         self.pkg_frame = ttk.Labelframe(
             main_frame, text="必須パッケージのステータス", padding=10
         )
-        self.pkg_frame.pack(fill=X, pady=(0, 20))
+        self.pkg_frame.pack(fill=X, pady=(0, 20), padx=20)
 
         self.pkg_labels = {}
         for pkg, desc in self.required_packages.items():
@@ -63,13 +106,13 @@ class SettingsWindow:
 
         # 操作ボタン
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=X, pady=10)
+        btn_frame.pack(fill=X, pady=10, padx=20)
 
         self.recheck_btn = ttk.Button(
             btn_frame,
             text="🔄 再チェック",
             command=self.check_environment,
-            bootstyle="secondary-outline",
+            bootstyle="secondary",
         )
         self.recheck_btn.pack(side=LEFT, padx=5)
 
@@ -84,12 +127,19 @@ class SettingsWindow:
 
         # ログ表示
         ttk.Label(main_frame, text="実行ログ:", font=("Yu Gothic UI", 10, "bold")).pack(
-            anchor=W, pady=(10, 5)
+            anchor=W, pady=(10, 5), padx=20
         )
+        colors = self.parent.style.colors
         self.log_text = tk.Text(
-            main_frame, height=10, font=("Consolas", 9), state="disabled"
+            main_frame,
+            height=10,
+            font=("Consolas", 11),
+            state="disabled",
+            bg=colors.inputbg,
+            fg=colors.inputfg,
+            insertbackground=colors.inputfg,
         )
-        self.log_text.pack(fill=BOTH, expand=YES)
+        self.log_text.pack(fill=X, pady=(0, 10), padx=20)
 
         # 閉じるボタン
         ttk.Button(
@@ -97,7 +147,7 @@ class SettingsWindow:
             text="閉じる",
             command=self.window.destroy,
             bootstyle="secondary",
-        ).pack(pady=(20, 0))
+        ).pack(pady=(10, 20))
 
     def log(self, message):
         if not self.window.winfo_exists():
@@ -113,15 +163,18 @@ class SettingsWindow:
             return
         self.log("環境チェックを開始します...")
         missing = []
+        colors = self.parent.style.colors
         for pkg in self.required_packages:
             spec = importlib.util.find_spec(pkg)
             if spec is not None:
                 self.pkg_labels[pkg].config(
-                    text="✅ インストール済み", foreground="green"
+                    text="✅ インストール済み", foreground=colors.success
                 )
                 self.package_status[pkg] = True
             else:
-                self.pkg_labels[pkg].config(text="❌ 未インストール", foreground="red")
+                self.pkg_labels[pkg].config(
+                    text="❌ 未インストール", foreground=colors.danger
+                )
                 self.package_status[pkg] = False
                 missing.append(pkg)
 
@@ -182,3 +235,20 @@ class SettingsWindow:
                     )
 
         threading.Thread(target=run_install, daemon=True).start()
+
+    def _on_theme_change(self):
+        """テーマが変更された時の処理"""
+        new_theme = self.theme_var.get()
+        self.log(f"テーマを {new_theme} に変更します...")
+
+        if self.app_instance:
+            self.app_instance.change_theme(new_theme)
+        else:
+            # app_instanceがない場合は直接スタイルを変更
+            self.parent.style.theme_use(new_theme)
+
+        # 自身のログテキストの色も更新
+        colors = self.parent.style.colors
+        self.log_text.configure(
+            bg=colors.inputbg, fg=colors.inputfg, insertbackground=colors.inputfg
+        )

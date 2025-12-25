@@ -54,7 +54,6 @@ class MusicRangeEditorWindow:
         self.window.title(f"範囲編集 - {os.path.basename(self.path)}")
         self.window.geometry("800x500")
         self.window.minsize(600, 400)
-        self.window.configure(bg=COLOR_BACKGROUND)
 
         # モーダル設定
         self.window.transient(parent)
@@ -81,19 +80,20 @@ class MusicRangeEditorWindow:
         ttk.Label(
             header_frame,
             text=f"ファイル全体の長さ: {self.file_duration:.2f}秒",
-            foreground="#666",
+            bootstyle="secondary",
         ).pack(side="right")
 
         # 波形表示エリア
         self.canvas_frame = ttk.Frame(main_frame)
         self.canvas_frame.pack(fill="both", expand=True, pady=10)
 
+        colors = self.window.style.colors
         self.canvas = tk.Canvas(
             self.canvas_frame,
-            bg="#f0f0f0",
+            bg=colors.inputbg,
             height=200,
             highlightthickness=1,
-            highlightbackground="#ccc",
+            highlightbackground=colors.border,
         )
         self.canvas.pack(fill="both", expand=True)
 
@@ -223,13 +223,17 @@ class MusicRangeEditorWindow:
         start_x = (self.start_time.get() / self.file_duration) * width
         end_x = (self.end_time.get() / self.file_duration) * width
 
+        # テーマに応じてマスクの色を変える
+        is_dark = self.window.style.theme_use() == "darkly"
+        mask_color = "white" if is_dark else "black"
+
         # 開始前
         self.canvas.create_rectangle(
-            0, 0, start_x, height, fill="black", stipple="gray50", outline=""
+            0, 0, start_x, height, fill=mask_color, stipple="gray50", outline=""
         )
         # 終了後
         self.canvas.create_rectangle(
-            end_x, 0, width, height, fill="black", stipple="gray50", outline=""
+            end_x, 0, width, height, fill=mask_color, stipple="gray50", outline=""
         )
 
         # ハンドル（線）

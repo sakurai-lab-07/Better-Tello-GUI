@@ -49,7 +49,6 @@ class MusicManagerWindow:
         self.window.title("音楽管理 - メドレー設定")
         self.window.geometry("700x700")
         self.window.minsize(600, 650)
-        self.window.configure(bg=COLOR_BACKGROUND)
 
         # モーダルウィンドウとして設定
         self.window.transient(parent)
@@ -113,7 +112,7 @@ class MusicManagerWindow:
             header_frame,
             text="複数の音楽ファイルを順番に再生します",
             style="MusicManager.TLabel",
-            foreground="#666",
+            bootstyle="secondary",
         ).pack(side="left", padx=(10, 0))
 
         # 音楽リストフレーム
@@ -128,12 +127,19 @@ class MusicManagerWindow:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.grid(row=0, column=1, sticky="ns")
 
+        colors = self.window.style.colors
         self.listbox = tk.Listbox(
             list_frame,
             font=FONT_NORMAL,
             yscrollcommand=scrollbar.set,
             selectmode=tk.SINGLE,
             height=10,
+            bg=colors.inputbg,
+            fg=colors.inputfg,
+            selectbackground=colors.selectbg,
+            selectforeground=colors.selectfg,
+            highlightthickness=0,
+            borderwidth=0,
         )
         self.listbox.grid(row=0, column=0, sticky="nsew")
         scrollbar.config(command=self.listbox.yview)
@@ -188,7 +194,7 @@ class MusicManagerWindow:
             text="⬆️",
             command=self._move_up,
             width=5,
-            bootstyle="secondary-outline",
+            bootstyle="secondary",
         ).pack(side="left", padx=(0, 2))
 
         ttk.Button(
@@ -196,7 +202,7 @@ class MusicManagerWindow:
             text="⬇️",
             command=self._move_down,
             width=5,
-            bootstyle="secondary-outline",
+            bootstyle="secondary",
         ).pack(side="left")
 
         # --- プレビューグループ ---
@@ -211,7 +217,7 @@ class MusicManagerWindow:
             text="🔊 再生",
             command=self._preview_selected,
             width=12,
-            bootstyle="info-outline",
+            bootstyle="info",
         ).pack(pady=2)
 
         ttk.Button(
@@ -219,7 +225,7 @@ class MusicManagerWindow:
             text="✂️ 範囲編集",
             command=self._open_range_editor,
             width=12,
-            bootstyle="warning-outline",
+            bootstyle="warning",
         ).pack(pady=2)
 
         ttk.Button(
@@ -227,7 +233,7 @@ class MusicManagerWindow:
             text="⏹️ 停止",
             command=self._stop_preview,
             width=12,
-            bootstyle="secondary-outline",
+            bootstyle="secondary",
         ).pack(pady=2)
 
         # インターバル設定フレーム
