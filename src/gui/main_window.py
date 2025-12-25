@@ -97,6 +97,9 @@ class TelloApp:
         self.music_list = []
         self.timeline_window = None
 
+        # トースト通知用の変数
+        self._toast_frame = None
+
         # ネットワーク管理
         self.network_manager = NetworkManager() if NetworkManager else None
 
@@ -512,9 +515,7 @@ class TelloApp:
                     self.show_status.set(f"IPアドレス取得待機中... {i}")
                     time.sleep(1)
                 self.show_status.set("接続処理完了。IP検出を実行してください。")
-                messagebox.showinfo(
-                    "接続完了", "接続完了。IP検出ボタンを押してください。"
-                )
+                self.show_toast("✅ 接続完了。IP検出ボタンを押してください。")
             else:
                 self.log(
                     {"level": "WARNING", "message": "Telloが見つかりませんでした。"}
@@ -543,7 +544,7 @@ class TelloApp:
                 text=f"{name} ({t['ssid']}):"
             )
             self.log({"level": "SUCCESS", "message": f"検出: {name} -> {t['ip']}"})
-        messagebox.showinfo("完了", f"{len(found)}台設定しました。")
+        self.show_toast(f"✅ {len(found)}台設定しました。")
 
     def load_config(self):
         try:
@@ -564,7 +565,7 @@ class TelloApp:
             with open(CONFIG_FILE, "w") as f:
                 json.dump(data, f, indent=4)
             self.log({"level": "INFO", "message": "設定保存完了"})
-            messagebox.showinfo("成功", "保存しました。")
+            self.show_toast("✅ 設定を保存しました")
         except Exception as e:
             messagebox.showerror("エラー", f"保存失敗: {e}")
 
@@ -602,7 +603,7 @@ class TelloApp:
                     "message": f"プロジェクトを保存しました: {os.path.basename(path)}",
                 }
             )
-            messagebox.showinfo("成功", "プロジェクトを保存しました。")
+            self.show_toast("✅ プロジェクトを保存しました")
         except Exception as e:
             messagebox.showerror("エラー", f"プロジェクトの保存に失敗しました: {e}")
 
@@ -652,7 +653,8 @@ class TelloApp:
                     "message": f"プロジェクトを読み込みました: {os.path.basename(path)}",
                 }
             )
-            messagebox.showinfo("成功", "プロジェクトを読み込みました。")
+            # 通知アニメーションを表示
+            self.show_toast("✅ プロジェクトを読み込みました")
 
         except Exception as e:
             messagebox.showerror("エラー", f"プロジェクトの読み込みに失敗しました: {e}")
@@ -697,6 +699,71 @@ class TelloApp:
             self.music_player.get_interval(),
             self.music_player,
         )
+
+    def show_toast(self, message, duration=3000):
+        """プロジェクト読み込み成功時に通知風のトーストを表示"""
+        if self._toast_frame and self._toast_frame.winfo_exists():
+            self._toast_frame.destroy()
+
+        width = 350
+        height = 50
+
+        # ウィンドウの中央上に配置
+        # winfo_width()が1を返す場合があるため、最小値を設定
+        win_width = max(self.master.winfo_width(), 800)
+        x = (win_width // 2) - (width // 2)
+        y = -height  # 最初は画面外（上）に配置
+
+        # tk.Frameを使用して背景色を確実に適用（ttkbootstrapのテーマに干渉されないように）
+        self._toast_frame = tk.Frame(
+            self.master,
+            bg="#4caf50",
+            highlightthickness=1,
+            highlightbackground="#388e3c",
+        )
+        self._toast_frame.place(x=x, y=y, width=width, height=height)
+
+        # tk.Labelを使用して文字色と背景色を確実に適用
+        label = tk.Label(
+            self._toast_frame,
+            text=message,
+            bg="#4caf50",
+            fg="white",
+            font=(self.font_normal[0], 11, "bold"),
+            anchor="center",
+        )
+        label.pack(expand=True, fill="both")
+
+        # 最前面に持ってくる
+        self._toast_frame.lift()
+
+        def slide_in(current_y):
+            if not self._toast_frame or not self._toast_frame.winfo_exists():
+                return
+            if current_y < 20:
+                new_y = current_y + 5
+                self._toast_frame.place(y=new_y)
+                self.master.after(10, lambda: slide_in(new_y))
+
+        def slide_out(current_y):
+            if not self._toast_frame or not self._toast_frame.winfo_exists():
+                return
+            if current_y > -height:
+                new_y = current_y - 5
+                self._toast_frame.place(y=new_y)
+                self.master.after(10, lambda: slide_out(new_y))
+            else:
+                try:
+                    self._toast_frame.destroy()
+                except:
+                    pass
+                self._toast_frame = None
+
+        # スライドイン開始
+        slide_in(-height)
+
+        # 指定時間後にスライドアウトして消える
+        self.master.after(duration, lambda: slide_out(20))
 
     def parse_scratch_project(self):
         path = self.sb3_path.get()
