@@ -5,6 +5,8 @@
 import threading
 import time
 import os
+import sys
+import contextlib
 
 try:
     import pygame
@@ -40,13 +42,16 @@ class MusicPlayer:
         self.stop_event = threading.Event()
         self.pygame_available = PYGAME_AVAILABLE
         self._waveform_cache = {}  # 波形データのキャッシュ
+        self._raw_waveform_cache = {}  # 生の波形データ（絶対値）のキャッシュ
         self._loading_waveforms = set()  # 現在ロード中のパス
         self._waveform_lock = threading.Lock()
 
         # pygameが利用可能な場合のみ初期化
         if self.pygame_available:
             try:
-                pygame.mixer.init()
+                # libmpg123の警告（ID3タグ関連）を抑制
+                with self._suppress_stderr():
+                    pygame.mixer.init()
                 self._log("INFO", "音楽プレイヤーを初期化しました。")
             except Exception as e:
                 self._log("ERROR", f"音楽プレイヤーの初期化に失敗: {e}")
@@ -56,6 +61,25 @@ class MusicPlayer:
                 "WARNING",
                 "pygameがインストールされていません。音楽再生機能は使用できません。",
             )
+
+    @contextlib.contextmanager
+    def _suppress_stderr(self):
+        """Cレベルのstderr出力を抑制するコンテキストマネージャ"""
+        try:
+            # Windowsでの標準的な抑制方法
+            null_fds = [os.open(os.devnull, os.O_RDWR)]
+            save_fds = [os.dup(2)]
+            os.dup2(null_fds[0], 2)
+            yield
+        except Exception:
+            yield
+        finally:
+            try:
+                os.dup2(save_fds[0], 2)
+                for fd in null_fds + save_fds:
+                    os.close(fd)
+            except Exception:
+                pass
 
     def _log(self, level, message):
         """ログを出力"""
@@ -139,7 +163,8 @@ class MusicPlayer:
                     return
 
                 # 音楽をロードして再生
-                pygame.mixer.music.load(self.music_path)
+                with self._suppress_stderr():
+                    pygame.mixer.music.load(self.music_path)
                 pygame.mixer.music.play()
                 self.is_playing = True
                 self._log("SUCCESS", "🎵 音楽の再生を開始しました。")
@@ -193,7 +218,8 @@ class MusicPlayer:
 
                     try:
                         # 音楽をロードして再生
-                        pygame.mixer.music.load(music_path)
+                        with self._suppress_stderr():
+                            pygame.mixer.music.load(music_path)
                         pygame.mixer.music.play()
                         self._log("INFO", f"♪ {i}/{len(self.music_list)}: {filename}")
 
@@ -322,7 +348,8 @@ class MusicPlayer:
             return 0.0
 
         try:
-            sound = pygame.mixer.Sound(music_path)
+            with self._suppress_stderr():
+                sound = pygame.mixer.Sound(music_path)
             return sound.get_length()
         except Exception as e:
             self._log(
@@ -349,25 +376,34 @@ class MusicPlayer:
             return self._waveform_cache[cache_key]
 
         try:
-            # 非常に低いサンプリングレートで読み込む（高速化のため）
-            y, sr = librosa.load(music_path, sr=2000)
+            # 生データのキャッシュを確認
+            if music_path in self._raw_waveform_cache:
+                y_abs = self._raw_waveform_cache[music_path]
+            else:
+                # 非常に低いサンプリングレートで読み込む（高速化のため）
+                with self._suppress_stderr():
+                    y, sr = librosa.load(music_path, sr=2000)
 
-            if len(y) > 0:
-                # 絶対値を取る
-                y_abs = np.abs(y)
-                # num_pointsに分割して各区間の最大値を取得
-                chunks = np.array_split(y_abs, num_points)
-                waveform = [
-                    float(np.max(chunk)) if len(chunk) > 0 else 0.0 for chunk in chunks
-                ]
+                if len(y) > 0:
+                    # 絶対値を取る
+                    y_abs = np.abs(y)
+                    self._raw_waveform_cache[music_path] = y_abs
+                else:
+                    return []
 
-                # 正規化（最大値を1.0にする）
-                max_val = max(waveform) if waveform else 0
-                if max_val > 0:
-                    waveform = [v / max_val for v in waveform]
+            # num_pointsに分割して各区間の最大値を取得
+            chunks = np.array_split(y_abs, num_points)
+            waveform = [
+                float(np.max(chunk)) if len(chunk) > 0 else 0.0 for chunk in chunks
+            ]
 
-                self._waveform_cache[cache_key] = waveform
-                return waveform
+            # 正規化（最大値を1.0にする）
+            max_val = max(waveform) if waveform else 0
+            if max_val > 0:
+                waveform = [v / max_val for v in waveform]
+
+            self._waveform_cache[cache_key] = waveform
+            return waveform
         except Exception as e:
             self._log("DEBUG", f"波形データの取得に失敗: {e}")
 

@@ -64,6 +64,7 @@ class TimelineViewerWindow:
         self.zoom_level = tk.DoubleVar(value=20.0)
         self.track_height = 60
         self.label_width = 120
+        self._draw_timer = None
 
         # UI構築
         self._create_widgets()
@@ -87,7 +88,7 @@ class TimelineViewerWindow:
             to=100.0,
             variable=self.zoom_level,
             orient="horizontal",
-            command=lambda _: self.draw_timeline(),
+            command=self._on_zoom_change,
             bootstyle="primary",
         )
         zoom_scale.pack(side="left", padx=5, fill="x", expand=True)
@@ -180,6 +181,12 @@ class TimelineViewerWindow:
 
     def _on_shift_mousewheel(self, event):
         self.canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_zoom_change(self, _):
+        """ズーム変更時のデバウンス処理"""
+        if self._draw_timer:
+            self.window.after_cancel(self._draw_timer)
+        self._draw_timer = self.window.after(20, self.draw_timeline)
 
     def draw_timeline(self):
         """タイムラインを描画"""
@@ -348,29 +355,34 @@ class TimelineViewerWindow:
 
             # 波形の描画
             if self.music_player:
-                # 描画幅に応じてポイント数を決定（1ピクセルあたり1ポイント程度）
+                # 描画幅に応じてポイント数を決定（キャッシュ効率のため固定値を使用）
                 draw_width = x_end - x_start
                 if draw_width > 10:
-                    num_points = int(draw_width)
-
-                    # キャッシュを確認
-                    cache_key = (path, num_points)
-                    waveform = self.music_player._waveform_cache.get(cache_key)
+                    # ズームレベルに関わらず一定の解像度で取得（キャッシュヒット率向上）
+                    num_points = 1000
+                    waveform = self.music_player._waveform_cache.get((path, num_points))
 
                     if waveform:
-                        # 波形を線で描画
+                        # 波形を1つのポリゴンとして描画（劇的な高速化）
+                        points = []
+                        # 上半分
                         for j, val in enumerate(waveform):
-                            px = x_start + j
-                            amp = val * 18
-                            if amp > 0.5:
-                                self.canvas.create_line(
-                                    px,
-                                    y_mid - amp,
-                                    px,
-                                    y_mid + amp,
-                                    fill="#e1bee7",
-                                    width=1,
-                                )
+                            px = x_start + (j / (len(waveform) - 1)) * draw_width
+                            points.extend([px, y_mid - val * 18])
+                        # 下半分（逆順）
+                        for j in range(len(waveform) - 1, -1, -1):
+                            val = waveform[j]
+                            px = x_start + (j / (len(waveform) - 1)) * draw_width
+                            points.extend([px, y_mid + val * 18])
+
+                        if len(points) >= 4:
+                            self.canvas.create_polygon(
+                                points,
+                                fill="#e1bee7",
+                                outline="#e1bee7",
+                                width=1,
+                                tags="waveform",
+                            )
                     else:
                         # 非同期でリクエスト
                         self.canvas.create_text(
