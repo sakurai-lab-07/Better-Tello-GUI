@@ -56,7 +56,7 @@ class TimelineViewerWindow:
         # ウィンドウの作成
         self.window = ttk.Toplevel(parent)
         self.window.title("タイムラインビューワー")
-        self.window.geometry("1000x600")
+        self.window.geometry("1100x600")
         self.window.minsize(800, 400)
 
         # ズーム倍率 (pixels per second)

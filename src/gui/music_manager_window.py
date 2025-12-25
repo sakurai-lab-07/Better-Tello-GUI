@@ -47,8 +47,8 @@ class MusicManagerWindow:
         # ウィンドウの作成
         self.window = ttk.Toplevel(parent)
         self.window.title("音楽管理 - メドレー設定")
-        self.window.geometry("700x700")
-        self.window.minsize(600, 650)
+        self.window.geometry("700x800")
+        self.window.minsize(700, 800)
 
         # モーダルウィンドウとして設定
         self.window.transient(parent)

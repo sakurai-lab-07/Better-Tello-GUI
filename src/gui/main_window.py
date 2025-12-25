@@ -63,8 +63,8 @@ class TelloApp:
     def __init__(self, master):
         self.master = master
         self.master.title("Tello Scratch ドローンショー・コントローラー")
-        self.master.geometry("1100x900")
-        self.master.minsize(1050, 850)
+        self.master.geometry("1350x1010")
+        self.master.minsize(1050, 1010)
 
         # フォント設定
         self.font_normal = FONT_NORMAL

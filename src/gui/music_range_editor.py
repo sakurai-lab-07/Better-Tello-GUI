@@ -52,8 +52,8 @@ class MusicRangeEditorWindow:
         # ウィンドウの作成
         self.window = ttk.Toplevel(parent)
         self.window.title(f"範囲編集 - {os.path.basename(self.path)}")
-        self.window.geometry("800x500")
-        self.window.minsize(600, 400)
+        self.window.geometry("980x550")
+        self.window.minsize(750, 500)
 
         # モーダル設定
         self.window.transient(parent)

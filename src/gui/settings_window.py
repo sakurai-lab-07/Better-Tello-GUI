@@ -21,8 +21,8 @@ class SettingsWindow:
         self.window = ttk.Toplevel(parent)
         self.window.title("設定・環境チェック")
         # ウィンドウサイズの設定
-        self.window.geometry("500x650")
-        self.window.minsize(450, 550)
+        self.window.geometry("580x710")
+        self.window.minsize(580, 710)
 
         # 必要なパッケージリスト
         self.required_packages = {
@@ -140,14 +140,6 @@ class SettingsWindow:
             insertbackground=colors.inputfg,
         )
         self.log_text.pack(fill=X, pady=(0, 10), padx=20)
-
-        # 閉じるボタン
-        ttk.Button(
-            main_frame,
-            text="閉じる",
-            command=self.window.destroy,
-            bootstyle="secondary",
-        ).pack(pady=(10, 20))
 
     def log(self, message):
         if not self.window.winfo_exists():
