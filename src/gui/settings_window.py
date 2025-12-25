@@ -57,7 +57,7 @@ class SettingsWindow:
         # テーマ名の取得を安全にする
         current_theme = "cosmo"
         try:
-            current_theme = self.parent.style.theme_name
+            current_theme = self.parent.style.theme_use()
         except:
             pass
 

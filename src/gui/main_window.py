@@ -592,7 +592,7 @@ class TelloApp:
     def save_config(self):
         data = {w["name"]: w["ip_widget"].get() for w in self.drone_entry_widgets}
         # テーマ設定も保存
-        data["app_theme"] = self.master.style.theme_name
+        data["app_theme"] = self.master.style.theme_use()
 
         try:
             with open(CONFIG_FILE, "w") as f:
