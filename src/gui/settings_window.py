@@ -34,6 +34,16 @@ class SettingsWindow:
 
         self.package_status = {}
 
+        # スタイル設定（絵文字のズレ対策）
+        s = ttk.Style()
+        btn_font = ("Segoe UI", 11)
+        s.configure("TButton", font=btn_font)
+        for bstyle in ["primary", "secondary", "success", "info", "warning", "danger"]:
+            s.configure(f"{bstyle}.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.TButton", font=btn_font)
+            s.configure(f"{bstyle}.Outline.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.Outline.TButton", font=btn_font)
+
         self._create_widgets()
 
         # UIの描画を強制

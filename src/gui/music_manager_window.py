@@ -88,7 +88,17 @@ class MusicManagerWindow:
         """スタイルを設定"""
         # ttkbootstrapを使用しているため、テーマに基づいたスタイルが自動的に適用されます。
         s = ttk.Style()
-        s.configure("MusicHeader.TLabel", font=FONT_HEADER)
+        # 絵文字との整列を改善するためSegoe UIを使用
+        s.configure("MusicHeader.TLabel", font=("Segoe UI", 11, "bold"))
+
+        # ボタンのスタイル（絵文字とテキストの垂直方向のズレを軽減）
+        btn_font = ("Segoe UI", 11)
+        s.configure("TButton", font=btn_font)
+        for bstyle in ["primary", "secondary", "success", "info", "warning", "danger"]:
+            s.configure(f"{bstyle}.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.TButton", font=btn_font)
+            s.configure(f"{bstyle}.Outline.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.Outline.TButton", font=btn_font)
 
     def _create_widgets(self):
         """UI要素を作成"""

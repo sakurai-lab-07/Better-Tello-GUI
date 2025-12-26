@@ -59,6 +59,16 @@ class MusicRangeEditorWindow:
         self.window.transient(parent)
         self.window.grab_set()
 
+        # スタイル設定（絵文字のズレ対策）
+        s = ttk.Style()
+        btn_font = ("Segoe UI", 11)
+        s.configure("TButton", font=btn_font)
+        for bstyle in ["primary", "secondary", "success", "info", "warning", "danger"]:
+            s.configure(f"{bstyle}.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.TButton", font=btn_font)
+            s.configure(f"{bstyle}.Outline.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.Outline.TButton", font=btn_font)
+
         self._create_widgets()
 
         # 波形データの取得と描画
@@ -74,7 +84,7 @@ class MusicRangeEditorWindow:
         header_frame.pack(fill="x", pady=(0, 10))
 
         ttk.Label(
-            header_frame, text=f"🎵 {os.path.basename(self.path)}", font=FONT_HEADER
+            header_frame, text=f"🎵 {os.path.basename(self.path)}", font=("Segoe UI", 11, "bold")
         ).pack(side="left")
 
         ttk.Label(

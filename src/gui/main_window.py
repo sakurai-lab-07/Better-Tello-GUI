@@ -140,6 +140,16 @@ class TelloApp:
         # LabelFrameのタイトルフォント
         s.configure("TLabelframe.Label", font=self.font_bold_large)
 
+        # ボタンのスタイル（絵文字とテキストの垂直方向のズレを軽減）
+        # Segoe UIはWindowsにおいて絵文字とのベースラインが合いやすいため採用
+        btn_font = ("Segoe UI", 11)
+        s.configure("TButton", font=btn_font)
+        for bstyle in ["primary", "secondary", "success", "info", "warning", "danger"]:
+            s.configure(f"{bstyle}.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.TButton", font=btn_font)
+            s.configure(f"{bstyle}.Outline.TButton", font=btn_font)
+            s.configure(f"{bstyle.capitalize()}.Outline.TButton", font=btn_font)
+
     def _create_widgets(self):
         main_frame = ttk.Frame(self.master, padding="15")
         main_frame.pack(fill="both", expand=True)
