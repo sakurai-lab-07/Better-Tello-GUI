@@ -41,6 +41,9 @@ class SettingsWindow:
         self.window.lift()
         self.window.focus_force()
 
+        # 設定ウィンドウ呼び出しで環境チェックを自動実行
+        self.check_environment()
+
     def _create_widgets(self):
         # メインフレーム
         main_frame = ttk.Frame(self.window, padding=20)
