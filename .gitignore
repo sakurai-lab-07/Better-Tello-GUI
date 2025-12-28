@@ -1,6 +1,7 @@
 # Add
 test-case/
 test-core/
+build/
 
 
 # Byte-compiled / optimized / DLL files
