@@ -7,15 +7,14 @@ class ScratchProjectParser:
     def __init__(self, sb3_path, log_queue):
         self.TAKEOFF_DURATION = 8.0
         # delay inserted between consecutive actions (seconds)
-        # set to 1.5s to satisfy "1,2秒のディレイ" request (midpoint)
-        self.INTER_COMMAND_DELAY = 1.5
+        self.INTER_COMMAND_DELAY = 0.0
         self.MIN_TELLO_MOVE = 20
         self.SCRATCH_TO_CM_RATE = 1
         self.INITIAL_HOVER_HEIGHT_CM = 80
         self.TELLO_HORIZONTAL_SPEED_CMS = 50.0
         self.TELLO_VERTICAL_SPEED_CMS = 40.0
         self.MOVE_TIME_OVERHEAD = 0.75
-        self.MINIMUM_MOVE_TIME = 1.5
+        self.MINIMUM_MOVE_TIME = 0.0
         self.sb3_path = sb3_path
         self.log_queue = log_queue
         self.project_data = self._load_project_data()
